@@ -3,7 +3,6 @@ use shell::setup_shell;
 
 fn main(){
     setup_shell()
-    // blablabla
 }
 
     /*let mut hd = Hd::new();

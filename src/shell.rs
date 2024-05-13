@@ -6,22 +6,13 @@ use fs::FsErr;
 use fs::hd::Hd;
 use std::io;
 use std::io::Write;
-use std::mem::ManuallyDrop;
 
-//Possible parsing errors
-enum ParsingError {
+enum ParsingErr {
     NotEnoughArgs,
     TooManyArgs,
     UnknownCommand,
-    UnknownFlag,
 }
-
-union Error {
-    fs_err: ManuallyDrop<FsErr>,
-}
-
-//Handled commands
-enum CmdName {
+enum CmdType {
     Cat,
     Cd,
     Ls,
@@ -34,33 +25,6 @@ enum CmdName {
     Touch,
     Write,
 }
-
-enum Flag {
-    Noflag,
-}
-
-//Type of the whole argument of a command
-struct CmdArg {
-    arg: Vec<char>,
-}
-
-//Type of a command, returned by the parser
-struct Command {
-    name: CmdName,
-    flags: Vec<Flag>,
-    args: Vec<Format>, //TODO switch to Vec<cmd_arg>
-}
-
-//A type of return for function eval
-struct EvalResult {
-    fdesc: Option<Fdesc>,
-    stdout: Option<Format>,
-}
-
-const EMPTY_EVAL_RESULT : Result<EvalResult, Error> = Ok(EvalResult {
-    fdesc: None,
-    stdout: None,
-});
 
 fn split(input: &Format) -> Vec<Format> {
     let mut res = Vec::new();
@@ -80,250 +44,211 @@ fn split(input: &Format) -> Vec<Format> {
     res
 }
 
-//Parser
-fn parse_command(input: Format) -> Result<Command, ParsingError> {
-    let input = split(&input);
-    match input[0].iter().collect::<String>().as_str() {
-        //TODO deeper checks of args
-        "cat" => { 
-            if input.len() == 1 {
-                return Err(ParsingError::NotEnoughArgs);
-            }
-            if input.len() > 2 {
-                return Err(ParsingError::TooManyArgs);
-            }
+struct Command {
+    name: CmdType,
+    args: Vec<Format>, //TODO switch to Vec<cmd_arg>
+}
 
-            Ok(Command {name: CmdName::Cat, flags: vec![], args: input[1..].to_vec()})
-        },
-
-        "cd" => {
-            if input.len() > 2 {
-                return Err(ParsingError::TooManyArgs);
-            }
-
-            Ok(Command {name: CmdName::Cd, flags: vec![], args: input[1..].to_vec()})
-        },
-
-        "ls" => {
-            if input.len() > 2 {
-                return Err(ParsingError::TooManyArgs);
-            }
-
-            Ok(Command {name: CmdName::Ls, flags: vec![], args: input[1..].to_vec()})
-        },
-
-        "mkdir" => {
-           if input.len() == 1 {
-                return Err(ParsingError::NotEnoughArgs);
-            }
-            if input.len() > 2 {
-                return Err(ParsingError::TooManyArgs);
-            }
-
-            Ok(Command {name: CmdName::Mkdir, flags: vec![], args: input[1..].to_vec()})
-        },
-        "mkfs" => Ok(Command {name: CmdName::Mkfs, flags: vec![], args: input[1..].to_vec()}),
-        "mount" => Ok(Command {name: CmdName::Mount, flags: vec![], args: input[1..].to_vec()}),
-        "mv" => {
-            if input.len() == 1 {
-                return Err(ParsingError::NotEnoughArgs);
-            }
-            if input.len() > 3 {
-                return Err(ParsingError::TooManyArgs);
-            }
-
-            Ok(Command {name: CmdName::Mv, flags: vec![], args: input[1..].to_vec()})
-        },
-
-        "rm" => {
-           if input.len() == 1 {
-                return Err(ParsingError::NotEnoughArgs);
-            }
-            if input.len() > 2 {
-                return Err(ParsingError::TooManyArgs);
-            } 
-
-            Ok(Command {name: CmdName::Rm, flags: vec![], args: input[1..].to_vec()})
-        },
-
-        "rmdir" => {
-            if input.len() == 1 {
-                return Err(ParsingError::NotEnoughArgs);
-            }
-            if input.len() > 2 {
-                return Err(ParsingError::TooManyArgs);
-            }
-
-
-            Ok(Command {name: CmdName::Rmdir, flags: vec![], args: input[1..].to_vec()})
-        },
-
-        "touch" => {
-            if input.len() == 1 {
-                return Err(ParsingError::NotEnoughArgs);
-            }
-            if input.len() > 2 {
-                return Err(ParsingError::TooManyArgs);
-            }
-
-            Ok(Command {name: CmdName::Touch, flags: vec![], args: input[1..].to_vec()})
-        },
-
-        "write" => {
-            if input.len() == 1 {
-                return Err(ParsingError::NotEnoughArgs);
-            }
-            if input.len() > 3 {
-                return Err(ParsingError::TooManyArgs);
-            }
-
-            Ok(Command {name: CmdName::Write, flags: vec![], args: input[1..].to_vec()})
-        },
-
-        _ => Err(ParsingError::UnknownCommand)
+impl Command {
+    fn parse(input: Format) -> Result<Command, ParsingErr> {
+        let input = split(&input);
+        match input[0].iter().collect::<String>().as_str() {
+            //TODO deeper checks of args
+            "cat" => { 
+                if input.len() == 1 {
+                    return Err(ParsingErr::NotEnoughArgs);
+                }
+                if input.len() > 2 {
+                    return Err(ParsingErr::TooManyArgs);
+                }
+    
+                Ok(Command {name: CmdType::Cat, args: input[1..].to_vec()})
+            },
+    
+            "cd" => {
+                if input.len() > 2 {
+                    return Err(ParsingErr::TooManyArgs);
+                }
+    
+                Ok(Command {name: CmdType::Cd, args: input[1..].to_vec()})
+            },
+    
+            "ls" => {
+                if input.len() > 2 {
+                    return Err(ParsingErr::TooManyArgs);
+                }
+    
+                Ok(Command {name: CmdType::Ls, args: input[1..].to_vec()})
+            },
+    
+            "mkdir" => {
+               if input.len() == 1 {
+                    return Err(ParsingErr::NotEnoughArgs);
+                }
+                if input.len() > 2 {
+                    return Err(ParsingErr::TooManyArgs);
+                }
+    
+                Ok(Command {name: CmdType::Mkdir, args: input[1..].to_vec()})
+            },
+            "mkfs" => Ok(Command {name: CmdType::Mkfs, args: input[1..].to_vec()}),
+            "mount" => Ok(Command {name: CmdType::Mount, args: input[1..].to_vec()}),
+            "mv" => {
+                if input.len() == 1 {
+                    return Err(ParsingErr::NotEnoughArgs);
+                }
+                if input.len() > 3 {
+                    return Err(ParsingErr::TooManyArgs);
+                }
+    
+                Ok(Command {name: CmdType::Mv, args: input[1..].to_vec()})
+            },
+    
+            "rm" => {
+               if input.len() == 1 {
+                    return Err(ParsingErr::NotEnoughArgs);
+                }
+                if input.len() > 2 {
+                    return Err(ParsingErr::TooManyArgs);
+                } 
+    
+                Ok(Command {name: CmdType::Rm, args: input[1..].to_vec()})
+            },
+    
+            "rmdir" => {
+                if input.len() == 1 {
+                    return Err(ParsingErr::NotEnoughArgs);
+                }
+                if input.len() > 2 {
+                    return Err(ParsingErr::TooManyArgs);
+                }
+    
+    
+                Ok(Command {name: CmdType::Rmdir, args: input[1..].to_vec()})
+            },
+    
+            "touch" => {
+                if input.len() == 1 {
+                    return Err(ParsingErr::NotEnoughArgs);
+                }
+                if input.len() > 2 {
+                    return Err(ParsingErr::TooManyArgs);
+                }
+    
+                Ok(Command {name: CmdType::Touch, args: input[1..].to_vec()})
+            },
+    
+            "write" => {
+                if input.len() == 1 {
+                    return Err(ParsingErr::NotEnoughArgs);
+                }
+                if input.len() > 3 {
+                    return Err(ParsingErr::TooManyArgs);
+                }
+    
+                Ok(Command {name: CmdType::Write, args: input[1..].to_vec()})
+            },
+    
+            _ => Err(ParsingErr::UnknownCommand)
+        }
     }
 }
 
-//eval function
-fn eval(fs: &mut Fs, cmd: Command, cur: &Fdesc) -> Result<EvalResult, Error> {
-    match cmd {
-        Command {name: CmdName::Cat, args, flags:_} => {
-            let tmp = args[0].iter().collect::<String>(); 
-            let true_args = tmp.trim();
+struct EvalResult {
+    fdesc: Option<Fdesc>,
+    stdout: Option<Format>,
+}
 
-            match fs.cat(cur, true_args) {
-                Ok(res) => Ok(EvalResult {
-                    fdesc: None,
-                    stdout: Some(res),
-                }),
-                Err(err) => Err(Error {
-                    fs_err: ManuallyDrop::new(err),
-                }),
-            }
-        },
+fn eval(fs: &mut Fs, cmd: Command, cur: &Fdesc) -> Result<EvalResult, FsErr> {
+    match cmd.name {
 
-        Command {name: CmdName::Cd, args, flags: _} => {
+        CmdType::Cd => {
             let tmp : String;
-            let true_args = if args.len() == 0 {"/"} else {tmp = args[0].iter().collect::<String>(); tmp.trim()};
-
-            match fs.cd(cur, true_args) {
-                Ok(res) => Ok(EvalResult {
-                    fdesc: Some(res),
-                    stdout: None,
-                }),
-                Err(err) => Err(Error {
-                        fs_err: ManuallyDrop::new(err),
-                }),
-            } 
+            let true_args = if cmd.args.len() == 0 {"/"} else {tmp = cmd.args[0].iter().collect::<String>(); tmp.trim()};
+            let res = fs.cd(cur, true_args)?;
+            return Ok(EvalResult {
+                fdesc: Some(res),
+                stdout: None,
+            })
         },
 
-        Command {name: CmdName::Ls, args, flags: _} => {
+        CmdType::Ls => {
             let tmp : String;
-            let true_args = if args.len() == 0 {"."} else {tmp = args[0].iter().collect::<String>(); tmp.trim()};
-
-            match fs.ls(cur, true_args) {
-                Ok(res) => Ok(EvalResult {
-                    fdesc: None,
-                    stdout: Some(res),
-                }),
-                Err(err) => Err(Error {
-                        fs_err: ManuallyDrop::new(err),
-                }),
-            }
+            let true_args = if cmd.args.len() == 0 {"."} else {tmp = cmd.args[0].iter().collect::<String>(); tmp.trim()};
+            let res = fs.ls(cur, true_args)?;
+            return Ok(EvalResult {
+                fdesc: None,
+                stdout: Some(res),
+            })
         },
 
-        Command {name: CmdName::Mkdir, args, flags: _} => {
-            let tmp = args[0].iter().collect::<String>(); 
+        CmdType::Cat => {
+            let tmp = cmd.args[0].iter().collect::<String>(); 
             let true_args = tmp.trim();
-
-            if let Some(err) = fs.mkdir(cur, true_args) {
-                Err(Error {
-                    fs_err: ManuallyDrop::new(err),
-                })
-            } else {
-                Ok(EvalResult{
-                    fdesc: None,
-                    stdout: None,
-                })
-            }
-        },
-        Command {name: CmdName::Mkfs, args:_, flags: _} => {todo!();},
-        Command {name: CmdName::Mount, args:_, flags: _} => {todo!();},
-        Command {name: CmdName::Mv, args, flags: _} => {
-            let tmp = args[0].iter().collect::<String>();
-            let tmp2 = args[1].iter().collect::<String>();
-            if let Some(err) = fs.mv(cur, tmp.trim(),tmp2.trim()) {
-                Err(Error {
-                    fs_err: ManuallyDrop::new(err),
-                })
-            } else {
-                Ok(EvalResult{
-                    fdesc: None,
-                    stdout: None,
-                })
-            }
+            let res = fs.cat(cur, true_args)?;
+            return Ok(EvalResult {
+                fdesc: None,
+                stdout: Some(res),
+            })
         },
 
-        Command {name: CmdName::Rm, args, flags: _} => {
-            let tmp = args[0].iter().collect::<String>();
+        CmdType::Mkdir => {
+            let tmp = cmd.args[0].iter().collect::<String>(); 
             let true_args = tmp.trim();
-
-            if let Some(err) = fs.rm(cur, true_args) {
-                Err(Error {
-                    fs_err: ManuallyDrop::new(err),
-                })
-            } else {
-                Ok(EvalResult{
-                    fdesc: None,
-                    stdout: None,
-                })
-            }
+            if let Some(err) = fs.mkdir(cur, true_args) {return Err(err)};
+            return Ok(EvalResult{
+                fdesc: None,
+                stdout: None,
+            })
         },
-        Command {name: CmdName::Rmdir, args, flags: _} => {
-            let tmp = args[0].iter().collect::<String>(); 
+        CmdType::Touch => {
+            let tmp = cmd.args[0].iter().collect::<String>(); 
             let true_args = tmp.trim();
-
-            if let Some(err) = fs.rmdir(cur, true_args) {
-                Err(Error {
-                    fs_err: ManuallyDrop::new(err),
-                })
-            } else {
-                Ok(EvalResult{
-                    fdesc: None,
-                    stdout: None,
-                })
-            }
+            if let Some(err) = fs.touch(cur, true_args) {return Err(err)};
+            return Ok(EvalResult{
+                fdesc: None,
+                stdout: None,
+            })
         },
-        Command {name: CmdName::Touch, args, flags: _} => {
-            let tmp = args[0].iter().collect::<String>(); 
+        CmdType::Rmdir => {
+            let tmp = cmd.args[0].iter().collect::<String>(); 
             let true_args = tmp.trim();
-
-            if let Some(err) = fs.touch(cur, true_args) {
-                Err(Error {
-                    fs_err: ManuallyDrop::new(err),
-                })
-            } else {
-                Ok(EvalResult{
-                    fdesc: None,
-                    stdout: None,
-                })
-            }
+            if let Some(err) = fs.rmdir(cur, true_args) {return Err(err)};
+            return Ok(EvalResult{
+                fdesc: None,
+                stdout: None,
+            })
+        },
+        CmdType::Rm => {
+            let tmp = cmd.args[0].iter().collect::<String>();
+            let true_args = tmp.trim();
+            if let Some(err) = fs.rm(cur, true_args) {return Err(err)};
+            return Ok(EvalResult{
+                fdesc: None,
+                stdout: None,
+            })
         },
 
-        Command {name: CmdName::Write, args, flags: _} => {
-            let tmp = args[0].iter().collect::<String>();
+        CmdType::Mkfs => {todo!();},
+        CmdType::Mount => {todo!();},
 
+        CmdType::Mv => {
+            let tmp1 = cmd.args[0].iter().collect::<String>();
+            let tmp2 = cmd.args[1].iter().collect::<String>();
+            if let Some(err) = fs.mv(cur, tmp1.trim(), tmp2.trim()) {return Err(err)};
+            return Ok(EvalResult{
+                fdesc: None,
+                stdout: None,
+            })
+        },
 
-            if let Some(err) = fs.write(cur, tmp.trim(), &args[1]) {
-                Err(Error {
-                    fs_err: ManuallyDrop::new(err),
-                })
-            } else {
-                Ok(EvalResult{
-                    fdesc: None,
-                    stdout: None,
-                })
-            }
+        CmdType::Write => {
+            let tmp = cmd.args[0].iter().collect::<String>();
+            if let Some(err) = fs.write(cur, tmp.trim(), &cmd.args[1]) {return Err(err)};
+            return Ok(EvalResult{
+                fdesc: None,
+                stdout: None,
+            })
         },
     }
 }
@@ -341,6 +266,33 @@ fn fmt_from(string : &str) -> Format {
         fmt.push(c);
     }
     return fmt
+}
+
+// ultra basic for the moment
+fn fs_handler(err : FsErr) {
+    let msg = match err {
+        FsErr::HdErr(_) => "HdErr",
+        FsErr::InvalidName => "The command has invalids characters !",
+        FsErr::FileNotFound => "File not found !",
+        FsErr::NoDirectory => "There is no directory !",
+        FsErr::Occuped => "Occuped",
+        FsErr::WriteDir => "WriteDir",
+        FsErr::FileExist => "FileExist",
+        FsErr::DirFull => "DirFull",
+        FsErr::ImapFull => "ImapFull",
+        FsErr::DmapFull => "DmapFull",
+        FsErr::UndefBlk => "UndefBlk",
+        FsErr::RemoveDir => "RemoveDir",
+    };
+    println!("Error : {msg}");
+}
+
+fn parsing_handler(err : ParsingErr) {
+    match err {
+        ParsingErr::NotEnoughArgs   => println!("Not enough args !"),
+        ParsingErr::TooManyArgs     => println!("Too many args !"),
+        ParsingErr::UnknownCommand  => println!("Unknown command !"),
+    }
 }
 
 pub fn setup_shell() {
@@ -364,54 +316,17 @@ pub fn setup_shell() {
             .read_line(&mut input)
             .expect("Failed to read line");
         
-        let cmd = match parse_command(fmt_from(input.as_str().trim())) {
+        let cmd = match Command::parse(fmt_from(input.as_str().trim())) {
             Ok(cmd) => cmd,
-            Err(err) => {
-                match err {
-                    ParsingError::NotEnoughArgs => println!("Not enough args !"),
-                    ParsingError::TooManyArgs => println!("Too many args !"),
-                    ParsingError::UnknownCommand => println!("Unknown command !"),
-                    ParsingError::UnknownFlag => println!("Unknown flag !"),
-                }
-                continue
-            }
+            Err(err) => {parsing_handler(err); continue}
         };
 
-        unsafe {
-            match eval(&mut fs, cmd, &cur_desc) {
-            Err(Error {fs_err: err}) => {
-                println!("Error: {}", match ManuallyDrop::into_inner(err) {
-                    FsErr::HdErr(_hd_err) => "HdErr",
-                    FsErr::InvalidName => "InvalidName",
-                    FsErr::FileNotFound => "FileNotFound",
-                    FsErr::NoDirectory => "NoDirectory",
-                    FsErr::Occuped => "Occuped",
-                    FsErr::WriteDir => "WriteDir",
-                    FsErr::FileExist => "FileExist",
-                    FsErr::DirFull => "DirFull",
-                    FsErr::ImapFull => "ImapFull",
-                    FsErr::DmapFull => "DmapFull",
-                    FsErr::UndefBlk => "UndefBlk",
-                }
-                )
-            },
-            Ok(EvalResult {
-                fdesc: Some(fdesc),
-                stdout: Some(fmt),
-            }) => {cur_desc = fdesc; print(fmt)},
-            Ok(EvalResult {
-                fdesc: None,
-                stdout: Some(fmt),
-            }) => print(fmt),
-            Ok(EvalResult {
-                fdesc: Some(fdesc),
-                stdout: None,
-            }) => cur_desc = fdesc,
-            Ok(EvalResult {
-                fdesc: None,
-                stdout: None,
-            }) => continue,
-        }
-        }
+        let result = match eval(&mut fs, cmd, &cur_desc) {
+            Err(err) => {fs_handler(err); continue},
+            Ok(res) => res
+        };
+
+        if let Some(fdesc) = result.fdesc {cur_desc = fdesc};
+        if let Some(fmt) = result.stdout {print(fmt)};
     }
 }

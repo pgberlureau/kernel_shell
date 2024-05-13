@@ -182,6 +182,7 @@ pub enum FsErr {
     Occuped,
     WriteDir,
     FileExist,
+    RemoveDir,
     DirFull,
     ImapFull,
     DmapFull,
@@ -928,6 +929,8 @@ impl <'a> Fs <'a> {
             Ok(oi) => oi,
             Err(err) => return Some(err),
         };
+
+        if let FType::Dir = file_inode.ftype {return Some(FsErr::RemoveDir)};
 
         // Update bitmaps tables
         self.imap.free(file_inode.id as usize);
