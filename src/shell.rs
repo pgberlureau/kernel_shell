@@ -304,12 +304,16 @@ fn parsing_handler(err : ParsingErr) {
 pub fn setup() {
 
     let mut hd = Hd::new();
-    if let Some(err) = Fs::mkfs(&mut hd) {parsing_handler(err)};
+    if let Some(err) = Fs::mkfs(&mut hd) {fs_handler(err)};
 
-    let mut fs = match Fs::mount(&mut hd) {
-        Ok(fs) => fs,
-        Err(err) => parsing_handler(err),
-    };
+    let mut fs;
+    loop {
+        match Fs::mount(&mut hd) {
+            Ok(file_system) => {fs = file_system; break},
+            Err(err) => fs_handler(err),
+        };
+    }
+    
 
     let mut cur_desc = fs.get_home_fdesc();
 
