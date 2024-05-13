@@ -1,5 +1,5 @@
 /*
-    fs/hd.rs
+    shell/fs/hd.rs
 */
 
 pub const SECT_SIZE : usize = 0x200 ;       // 512 bytes sectors

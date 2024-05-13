@@ -1,3 +1,7 @@
+/*
+    shell.rs
+*/
+
 mod fs;
 use fs::Fs;
 use fs::Format;
@@ -46,7 +50,7 @@ fn split(input: &Format) -> Vec<Format> {
 
 struct Command {
     name: CmdType,
-    args: Vec<Format>, //TODO switch to Vec<cmd_arg>
+    args: Vec<Format>,
 }
 
 impl Command {
@@ -271,38 +275,40 @@ fn fmt_from(string : &str) -> Format {
 // ultra basic for the moment
 fn fs_handler(err : FsErr) {
     let msg = match err {
-        FsErr::HdErr(_) => "HdErr",
-        FsErr::InvalidName => "The command has invalids characters !",
-        FsErr::FileNotFound => "File not found !",
-        FsErr::NoDirectory => "There is no directory !",
-        FsErr::Occuped => "Occuped",
-        FsErr::WriteDir => "WriteDir",
-        FsErr::FileExist => "FileExist",
-        FsErr::DirFull => "DirFull",
-        FsErr::ImapFull => "ImapFull",
-        FsErr::DmapFull => "DmapFull",
-        FsErr::UndefBlk => "UndefBlk",
-        FsErr::RemoveDir => "RemoveDir",
+        FsErr::HdErr(_)     => "error due to hard drive",
+        FsErr::InvalidName  => "command has invalids characters",
+        FsErr::FileNotFound => "file not found",
+        FsErr::NoDirectory  => "there is no directory",
+        FsErr::Occuped      => "refusing to remove '.' or '..' directory",
+        FsErr::ReadDir      => "cannot read a directory",
+        FsErr::WriteDir     => "cannot write into a directory",
+        FsErr::FileExist    => "the file already exist",
+        FsErr::DirFull      => "dir is full",
+        FsErr::ImapFull     => "disk is full : there is no other free inodes to write",
+        FsErr::DmapFull     => "disk is full : there is no other free data blocks to write",
+        FsErr::UndefBlk     => "block is undefined",
+        FsErr::RemoveDir    => "cannot remove a directory",
     };
     println!("Error : {msg}");
 }
 
 fn parsing_handler(err : ParsingErr) {
-    match err {
-        ParsingErr::NotEnoughArgs   => println!("Not enough args !"),
-        ParsingErr::TooManyArgs     => println!("Too many args !"),
-        ParsingErr::UnknownCommand  => println!("Unknown command !"),
-    }
+    let msg = match err {
+        ParsingErr::NotEnoughArgs   => "not enough args",
+        ParsingErr::TooManyArgs     => "too many args",
+        ParsingErr::UnknownCommand  => "unknown command",
+    };
+    println!("Error : {msg}");
 }
 
-pub fn setup_shell() {
+pub fn setup() {
 
     let mut hd = Hd::new();
-    if let Some(err) = Fs::mkfs(&mut hd) {panic!("{:#?}",err)};
+    if let Some(err) = Fs::mkfs(&mut hd) {parsing_handler(err)};
 
     let mut fs = match Fs::mount(&mut hd) {
         Ok(fs) => fs,
-        Err(err) => panic!("{:#?}",err),
+        Err(err) => parsing_handler(err),
     };
 
     let mut cur_desc = fs.get_home_fdesc();
@@ -314,7 +320,7 @@ pub fn setup_shell() {
 
         io::stdin()
             .read_line(&mut input)
-            .expect("Failed to read line");
+            .expect("Error : failed to read line");
         
         let cmd = match Command::parse(fmt_from(input.as_str().trim())) {
             Ok(cmd) => cmd,

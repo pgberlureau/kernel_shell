@@ -1,5 +1,5 @@
 /*
-    fs/main.rs
+    shell/fs.rs
 */
 
 pub mod hd;
@@ -180,6 +180,7 @@ pub enum FsErr {
     FileNotFound,
     NoDirectory,
     Occuped,
+    ReadDir,
     WriteDir,
     FileExist,
     RemoveDir,
@@ -991,6 +992,7 @@ impl <'a> Fs <'a> {
         let mut v : Format = Vec::new();
         let iid = cur_dir.desc_tbl[cur_dir.find_file(name)?].iid;
         let inode = self.read_inode(iid)?;
+        if let FType::Dir = inode.ftype {return Err(FsErr::ReadDir)};
         for k in 0..inode.size{
             let blk = self.read_fblk(iid,k)?;
             for l in 0..BLK_SIZE{
