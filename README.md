@@ -2,11 +2,11 @@
 
 ## Arch 
 
-src/
-├── main.rs
-├── shell
-│   ├── fs
-│   │   └── hd.rs
-│   └── fs.rs
-└── shell.rs
+scr/
+|-- main.rs
+|-- shell
+|   |-- fs
+|   |   |-- hd.rs
+|   |-- fs.rs
+|-- shell.rs
 

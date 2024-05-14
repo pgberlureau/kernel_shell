@@ -45,17 +45,7 @@ const EMPTY_SUPER: Super = Super {
     },
 };
 
-//const NULL : char = 0 as char;
-//const SOT  : char = 2 as char;
-//const EOT  : char = 3 as char;
-//const ESC  : char = 0x1b as char;
-
 // Some utils (most are unsafe, but expected to be used only in a secure context)
-/*
-* Select byte[bit] with convention :
-*   0 1 2 3 4 5 6 7 8
-*   0 0 0 0 0 1 0 0 0 -> byte[5] = true
-*/
 #[inline(always)]
 fn select_bit(byte : u8, bit : usize) -> bool {
     ((byte<<bit)>>7) == 1
@@ -91,9 +81,9 @@ fn fetch(buff : &[u8], ofs : usize) -> u32 {
 }
 #[inline(always)]
 fn is_alpha_num(c : char) -> bool {
-    (c > 'A' && c < 'Z') 
-    || (c > 'a' && c < 'z') 
-    || (c > '0' && c < '9')
+    (c >= 'A' && c <= 'Z') 
+    || (c >= 'a' && c <= 'z') 
+    || (c >= '0' && c <= '9')
 }
 #[inline(always)]
 fn ceil(a : usize, b : usize) -> usize{
@@ -190,6 +180,7 @@ pub enum FsErr {
     DmapFull,
     UndefBlk,
     InvalidCur,
+    MvCurOrPrev,
 }
 
 #[derive(Debug)] // TODO : remove it
@@ -477,10 +468,6 @@ pub struct Fs <'a> {
     dmap: Bitmap,
 }
 
-/*
- *   put Inode where iid appears in args ???
- */
-
 impl <'a> Fs <'a> {
 
     pub fn mkfs(hd : &'a mut Hd) -> Option<FsErr> {
@@ -743,7 +730,7 @@ impl <'a> Fs <'a> {
 
     fn mkdir__(&mut self, cur : &mut Dir, name : &str) -> Option<FsErr>{
         // check validity of the current directory
-        let iid = cur_dir.desc.iid;
+        let iid = cur.desc.iid;
         if !self.imap.is_free(iid as usize) {return Some(FsErr::InvalidCur)};
 
         // reject if current directory is full or the name is already used
@@ -1151,6 +1138,7 @@ impl<'a> Fs<'a> {
                 }
             }
             let next = &cur.desc_tbl[cur.find_file(path.cur)?];
+            println!("tada!");
             return _chassing2_(fs,next,path.next)
         }
 
@@ -1166,6 +1154,15 @@ impl<'a> Fs<'a> {
             ((od,on),(nd,None))    => (od,nd,on,on),
             ((od,on),(nd,Some(nn))) => (od,nd,on,nn)
         };
+
+        let mut buff = old_name.chars();
+        if let Some('.') = buff.next() {
+            let tmp = buff.next();
+            if let None = tmp {return Some(FsErr::MvCurOrPrev)};
+            if let Some('.') = tmp {
+                if let None = buff.next() {return Some(FsErr::MvCurOrPrev)}
+            }
+        }
         return _mv_(self, &mut old_dir, &mut new_dir, old_name, new_name)
     }
 

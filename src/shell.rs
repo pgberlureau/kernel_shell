@@ -29,6 +29,7 @@ enum CmdType {
     Touch,
     Write,
     Exit,
+    Empty,
 }
 
 fn split(input: &Format) -> Vec<Format> {
@@ -99,7 +100,7 @@ impl Command {
             "mkfs" => Ok(Command {name: CmdType::Mkfs, args: input[1..].to_vec()}),
             "mount" => Ok(Command {name: CmdType::Mount, args: input[1..].to_vec()}),
             "mv" => {
-                if input.len() == 1 {
+                if input.len() <= 2 {
                     return Err(ParsingErr::NotEnoughArgs);
                 }
                 if input.len() > 3 {
@@ -144,7 +145,7 @@ impl Command {
             },
     
             "write" => {
-                if input.len() == 1 {
+                if input.len() <= 2 {
                     return Err(ParsingErr::NotEnoughArgs);
                 }
                 if input.len() > 3 {
@@ -162,8 +163,124 @@ impl Command {
                     return Err(ParsingErr::TooManyArgs);
                 }
             },
+
+            "" => {
+                return Ok(Command {name: CmdType::Empty, args: vec![]});
+            }
     
             _ => Err(ParsingErr::UnknownCommand)
+        }
+    }
+
+    fn eval(&self, fs: &mut Fs, cur: &Fdesc) -> Result<EvalResult, FsErr> {
+        match self.name {
+    
+            CmdType::Cd => {
+                let tmp : String;
+                let true_args = if self.args.len() == 0 {"/"} else {tmp = self.args[0].iter().collect::<String>(); tmp.trim()};
+                let res = fs.cd(cur, true_args)?;
+                return Ok(EvalResult {
+                    fdesc: Some(res),
+                    stdout: None,
+                })
+            },
+    
+            CmdType::Ls => {
+                let tmp : String;
+                let true_args = if self.args.len() == 0 {"."} else {tmp = self.args[0].iter().collect::<String>(); tmp.trim()};
+                let res = fs.ls(cur, true_args)?;
+                return Ok(EvalResult {
+                    fdesc: None,
+                    stdout: Some(res),
+                })
+            },
+    
+            CmdType::Cat => {
+                let tmp = self.args[0].iter().collect::<String>(); 
+                let true_args = tmp.trim();
+                let res = fs.cat(cur, true_args)?;
+                return Ok(EvalResult {
+                    fdesc: None,
+                    stdout: Some(res),
+                })
+            },
+    
+            CmdType::Mkdir => {
+                let tmp = self.args[0].iter().collect::<String>(); 
+                let true_args = tmp.trim();
+                if let Some(err) = fs.mkdir(cur, true_args) {return Err(err)};
+                return Ok(EvalResult{
+                    fdesc: None,
+                    stdout: None,
+                })
+            },
+
+            CmdType::Touch => {
+                let tmp = self.args[0].iter().collect::<String>(); 
+                let true_args = tmp.trim();
+                if let Some(err) = fs.touch(cur, true_args) {return Err(err)};
+                return Ok(EvalResult{
+                    fdesc: None,
+                    stdout: None,
+                })
+            },
+
+            CmdType::Rmdir => {
+                let tmp = self.args[0].iter().collect::<String>(); 
+                let true_args = tmp.trim();
+                if let Some(err) = fs.rmdir(cur, true_args) {return Err(err)};
+                return Ok(EvalResult{
+                    fdesc: None,
+                    stdout: None,
+                })
+            },
+
+            CmdType::Rm => {
+                let tmp = self.args[0].iter().collect::<String>();
+                let true_args = tmp.trim();
+                if let Some(err) = fs.rm(cur, true_args) {return Err(err)};
+                return Ok(EvalResult{
+                    fdesc: None,
+                    stdout: None,
+                })
+            },
+    
+            CmdType::Mkfs => {todo!();},
+
+            CmdType::Mount => {todo!();},
+    
+            CmdType::Mv => {
+                let tmp1 = self.args[0].iter().collect::<String>();
+                let tmp2 = self.args[1].iter().collect::<String>();
+                if let Some(err) = fs.mv(cur, tmp1.trim(), tmp2.trim()) {return Err(err)};
+                return Ok(EvalResult{
+                    fdesc: None,
+                    stdout: None,
+                })
+            },
+    
+            CmdType::Write => {
+                let tmp = self.args[0].iter().collect::<String>();
+                if let Some(err) = fs.write(cur, tmp.trim(), &self.args[1]) {return Err(err)};
+                return Ok(EvalResult{
+                    fdesc: None,
+                    stdout: None,
+                })
+            },
+    
+            CmdType::Exit => {
+                return Ok(EvalResult{
+                    fdesc: None,
+                    stdout: None,
+                })
+            }
+
+            CmdType::Empty => {
+                return Ok(EvalResult{
+                    fdesc: None,
+                    stdout: None,
+                })
+            },
         }
     }
 }
@@ -171,107 +288,6 @@ impl Command {
 struct EvalResult {
     fdesc: Option<Fdesc>,
     stdout: Option<Format>,
-}
-
-fn eval(fs: &mut Fs, cmd: Command, cur: &Fdesc) -> Result<EvalResult, FsErr> {
-    match cmd.name {
-
-        CmdType::Cd => {
-            let tmp : String;
-            let true_args = if cmd.args.len() == 0 {"/"} else {tmp = cmd.args[0].iter().collect::<String>(); tmp.trim()};
-            let res = fs.cd(cur, true_args)?;
-            return Ok(EvalResult {
-                fdesc: Some(res),
-                stdout: None,
-            })
-        },
-
-        CmdType::Ls => {
-            let tmp : String;
-            let true_args = if cmd.args.len() == 0 {"."} else {tmp = cmd.args[0].iter().collect::<String>(); tmp.trim()};
-            let res = fs.ls(cur, true_args)?;
-            return Ok(EvalResult {
-                fdesc: None,
-                stdout: Some(res),
-            })
-        },
-
-        CmdType::Cat => {
-            let tmp = cmd.args[0].iter().collect::<String>(); 
-            let true_args = tmp.trim();
-            let res = fs.cat(cur, true_args)?;
-            return Ok(EvalResult {
-                fdesc: None,
-                stdout: Some(res),
-            })
-        },
-
-        CmdType::Mkdir => {
-            let tmp = cmd.args[0].iter().collect::<String>(); 
-            let true_args = tmp.trim();
-            if let Some(err) = fs.mkdir(cur, true_args) {return Err(err)};
-            return Ok(EvalResult{
-                fdesc: None,
-                stdout: None,
-            })
-        },
-        CmdType::Touch => {
-            let tmp = cmd.args[0].iter().collect::<String>(); 
-            let true_args = tmp.trim();
-            if let Some(err) = fs.touch(cur, true_args) {return Err(err)};
-            return Ok(EvalResult{
-                fdesc: None,
-                stdout: None,
-            })
-        },
-        CmdType::Rmdir => {
-            let tmp = cmd.args[0].iter().collect::<String>(); 
-            let true_args = tmp.trim();
-            if let Some(err) = fs.rmdir(cur, true_args) {return Err(err)};
-            return Ok(EvalResult{
-                fdesc: None,
-                stdout: None,
-            })
-        },
-        CmdType::Rm => {
-            let tmp = cmd.args[0].iter().collect::<String>();
-            let true_args = tmp.trim();
-            if let Some(err) = fs.rm(cur, true_args) {return Err(err)};
-            return Ok(EvalResult{
-                fdesc: None,
-                stdout: None,
-            })
-        },
-
-        CmdType::Mkfs => {todo!();},
-        CmdType::Mount => {todo!();},
-
-        CmdType::Mv => {
-            let tmp1 = cmd.args[0].iter().collect::<String>();
-            let tmp2 = cmd.args[1].iter().collect::<String>();
-            if let Some(err) = fs.mv(cur, tmp1.trim(), tmp2.trim()) {return Err(err)};
-            return Ok(EvalResult{
-                fdesc: None,
-                stdout: None,
-            })
-        },
-
-        CmdType::Write => {
-            let tmp = cmd.args[0].iter().collect::<String>();
-            if let Some(err) = fs.write(cur, tmp.trim(), &cmd.args[1]) {return Err(err)};
-            return Ok(EvalResult{
-                fdesc: None,
-                stdout: None,
-            })
-        },
-
-        CmdType::Exit => {
-            return Ok(EvalResult{
-                fdesc: None,
-                stdout: None,
-            })
-        },
-    }
 }
 
 fn print(data : Format){
@@ -306,6 +322,7 @@ fn fs_handler(err : FsErr) {
         FsErr::UndefBlk     => "block is undefined",
         FsErr::RemoveDir    => "cannot remove a directory",
         FsErr::InvalidCur   => "the current directory has been removed",
+        FsErr::MvCurOrPrev  => "cannot move '.' or '..' directory"
     };
     println!("Error : {msg}");
 }
@@ -332,7 +349,6 @@ pub fn setup() {
         };
     }
     
-
     let mut cur_desc = fs.get_home_fdesc();
 
     loop {
@@ -351,7 +367,7 @@ pub fn setup() {
 
         if let CmdType::Exit = cmd.name {break};
 
-        let result = match eval(&mut fs, cmd, &cur_desc) {
+        let result = match cmd.eval(&mut fs, &cur_desc) {
             Err(err) => {fs_handler(err); continue},
             Ok(res) => res
         };
