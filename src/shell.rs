@@ -11,10 +11,13 @@ use fs::hd::Hd;
 use std::io;
 use std::io::Write;
 
+const STD_SIZE : usize = 0x1000;
+
 enum ParsingErr {
     NotEnoughArgs,
     TooManyArgs,
     UnknownCommand,
+    IncorrectRedirect,
 }
 enum CmdType {
     Cat,
@@ -32,43 +35,44 @@ enum CmdType {
     Empty,
 }
 
-fn split(input: &Format) -> Vec<Format> {
-    let mut res = Vec::new();
-    let mut i : usize = 0;
-    let mut curr = Vec::new();
 
-    while i < input.len() {
-        if input[i] == ' ' {
-            res.push(curr);
-            curr = Vec::new();
-        } else {
-            curr.push(input[i]);
-        }
-        i += 1;
-    }
-    res.push(curr);
-    res
-}
 
-struct Command {
+struct SimpleCommand {
     name: CmdType,
-    args: Vec<Format>,
+    args: Option<Vec<Format>>,
 }
 
-impl Command {
-    fn parse(input: Format) -> Result<Command, ParsingErr> {
-        let input = split(&input);
+impl SimpleCommand {
+    fn split(input: &Format) -> Vec<Format> {
+        let mut res = Vec::new();
+        let mut i : usize = 0;
+        let mut curr = Vec::new();
+
+        while i < input.len() {
+            if input[i] == ' ' {
+                if curr.len() > 0 {
+                    res.push(curr);
+                    curr = Vec::new();
+                }
+            } else {
+                curr.push(input[i]);
+            }
+            i += 1;
+        }
+        res.push(curr);
+        res
+    }    
+
+    fn parse(input: Format) -> Result<SimpleCommand, ParsingErr> {
+        let input = Self::split(&input);
         match input[0].iter().collect::<String>().as_str() {
             //TODO deeper checks of args
             "cat" => { 
-                if input.len() == 1 {
-                    return Err(ParsingErr::NotEnoughArgs);
-                }
                 if input.len() > 2 {
                     return Err(ParsingErr::TooManyArgs);
                 }
     
-                Ok(Command {name: CmdType::Cat, args: input[1..].to_vec()})
+                Ok(SimpleCommand {name: CmdType::Cat, args: if input.len() == 1 {None} else {Some(input[1..].to_vec())}})
             },
     
             "cd" => {
@@ -76,7 +80,7 @@ impl Command {
                     return Err(ParsingErr::TooManyArgs);
                 }
     
-                Ok(Command {name: CmdType::Cd, args: input[1..].to_vec()})
+                Ok(SimpleCommand {name: CmdType::Cd, args: if input.len() == 1 {None} else {Some(input[1..].to_vec())}})
             },
     
             "ls" => {
@@ -84,80 +88,68 @@ impl Command {
                     return Err(ParsingErr::TooManyArgs);
                 }
     
-                Ok(Command {name: CmdType::Ls, args: input[1..].to_vec()})
+                Ok(SimpleCommand {name: CmdType::Ls, args: if input.len() == 1 {None} else {Some(input[1..].to_vec())}})
             },
     
             "mkdir" => {
-               if input.len() == 1 {
-                    return Err(ParsingErr::NotEnoughArgs);
-                }
                 if input.len() > 2 {
                     return Err(ParsingErr::TooManyArgs);
                 }
     
-                Ok(Command {name: CmdType::Mkdir, args: input[1..].to_vec()})
+                Ok(SimpleCommand {name: CmdType::Mkdir, args: if input.len() == 1 {None} else {Some(input[1..].to_vec())}})
             },
-            "mkfs" => Ok(Command {name: CmdType::Mkfs, args: input[1..].to_vec()}),
-            "mount" => Ok(Command {name: CmdType::Mount, args: input[1..].to_vec()}),
+            "mkfs" => Ok(SimpleCommand {name: CmdType::Mkfs, args: Some(input[1..].to_vec())}),
+            "mount" => Ok(SimpleCommand {name: CmdType::Mount, args: Some(input[1..].to_vec())}),
             "mv" => {
-                if input.len() <= 2 {
+                if input.len() == 2 {
                     return Err(ParsingErr::NotEnoughArgs);
                 }
+
                 if input.len() > 3 {
                     return Err(ParsingErr::TooManyArgs);
                 }
     
-                Ok(Command {name: CmdType::Mv, args: input[1..].to_vec()})
+                Ok(SimpleCommand {name: CmdType::Mv, args: if input.len() == 1  {None} else {Some(input[1..].to_vec())}})
             },
     
             "rm" => {
-               if input.len() == 1 {
-                    return Err(ParsingErr::NotEnoughArgs);
-                }
                 if input.len() > 2 {
                     return Err(ParsingErr::TooManyArgs);
                 } 
     
-                Ok(Command {name: CmdType::Rm, args: input[1..].to_vec()})
+                Ok(SimpleCommand {name: CmdType::Rm, args: if input.len() == 1 {None} else {Some(input[1..].to_vec())}})
             },
     
             "rmdir" => {
-                if input.len() == 1 {
-                    return Err(ParsingErr::NotEnoughArgs);
-                }
                 if input.len() > 2 {
                     return Err(ParsingErr::TooManyArgs);
                 }
     
-    
-                Ok(Command {name: CmdType::Rmdir, args: input[1..].to_vec()})
+                Ok(SimpleCommand {name: CmdType::Rmdir, args: if input.len() == 1 {None} else {Some(input[1..].to_vec())}})
             },
     
             "touch" => {
-                if input.len() == 1 {
-                    return Err(ParsingErr::NotEnoughArgs);
-                }
                 if input.len() > 2 {
                     return Err(ParsingErr::TooManyArgs);
                 }
     
-                Ok(Command {name: CmdType::Touch, args: input[1..].to_vec()})
+                Ok(SimpleCommand {name: CmdType::Touch, args: if input.len() == 1 {None} else {Some(input[1..].to_vec())}})
             },
     
             "write" => {
-                if input.len() <= 2 {
+                if input.len() == 2 {
                     return Err(ParsingErr::NotEnoughArgs);
                 }
                 if input.len() > 3 {
                     return Err(ParsingErr::TooManyArgs);
                 }
     
-                Ok(Command {name: CmdType::Write, args: input[1..].to_vec()})
+                Ok(SimpleCommand {name: CmdType::Write, args: if input.len() == 1 {None} else {Some(input[1..].to_vec())}})
             },
 
             "exit" => {
                 if input.len() == 1 {
-                    return Ok(Command {name: CmdType::Exit, args: vec![]});
+                    return Ok(SimpleCommand {name: CmdType::Exit, args: None});
                 }
                 else {
                     return Err(ParsingErr::TooManyArgs);
@@ -165,83 +157,92 @@ impl Command {
             },
 
             "" => {
-                return Ok(Command {name: CmdType::Empty, args: vec![]});
+                return Ok(SimpleCommand {name: CmdType::Empty, args: None});
             }
     
             _ => Err(ParsingErr::UnknownCommand)
         }
     }
 
-    fn eval(&self, fs: &mut Fs, cur: &Fdesc) -> Result<EvalResult, FsErr> {
+    fn eval(&self, fs: &mut Fs, cur: &Fdesc, stdin: &Format) -> Result<EvalResult, FsErr> {
+        let args = if let Some(args) = &self.args { args.clone() } else { Self::split(&stdin) };
+
         match self.name {
     
             CmdType::Cd => {
                 let tmp : String;
-                let true_args = if self.args.len() == 0 {"/"} else {tmp = self.args[0].iter().collect::<String>(); tmp.trim()};
+                let true_args = if args.len() == 0 {"/"} else {tmp = args[0].iter().collect::<String>(); tmp.trim()};
                 let res = fs.cd(cur, true_args)?;
                 return Ok(EvalResult {
                     fdesc: Some(res),
                     stdout: None,
+                    exit: false,
                 })
             },
     
             CmdType::Ls => {
                 let tmp : String;
-                let true_args = if self.args.len() == 0 {"."} else {tmp = self.args[0].iter().collect::<String>(); tmp.trim()};
+                let true_args = if args.len() == 0 {"."} else {tmp = args[0].iter().collect::<String>(); tmp.trim()};
                 let res = fs.ls(cur, true_args)?;
                 return Ok(EvalResult {
                     fdesc: None,
                     stdout: Some(res),
+                    exit: false,
                 })
             },
     
             CmdType::Cat => {
-                let tmp = self.args[0].iter().collect::<String>(); 
+                let tmp = args[0].iter().collect::<String>(); 
                 let true_args = tmp.trim();
                 let res = fs.cat(cur, true_args)?;
                 return Ok(EvalResult {
                     fdesc: None,
                     stdout: Some(res),
+                    exit: false,
                 })
             },
     
             CmdType::Mkdir => {
-                let tmp = self.args[0].iter().collect::<String>(); 
+                let tmp = args[0].iter().collect::<String>(); 
                 let true_args = tmp.trim();
                 if let Some(err) = fs.mkdir(cur, true_args) {return Err(err)};
                 return Ok(EvalResult{
                     fdesc: None,
                     stdout: None,
+                    exit: false,
                 })
             },
 
             CmdType::Touch => {
-                let tmp = self.args[0].iter().collect::<String>(); 
+                let tmp = args[0].iter().collect::<String>(); 
                 let true_args = tmp.trim();
                 if let Some(err) = fs.touch(cur, true_args) {return Err(err)};
                 return Ok(EvalResult{
                     fdesc: None,
                     stdout: None,
+                    exit: false,
                 })
             },
 
             CmdType::Rmdir => {
-                let tmp = self.args[0].iter().collect::<String>(); 
+                let tmp = args[0].iter().collect::<String>(); 
                 let true_args = tmp.trim();
                 if let Some(err) = fs.rmdir(cur, true_args) {return Err(err)};
                 return Ok(EvalResult{
                     fdesc: None,
                     stdout: None,
+                    exit: false,
                 })
             },
 
             CmdType::Rm => {
-                let tmp = self.args[0].iter().collect::<String>();
+                let tmp = args[0].iter().collect::<String>();
                 let true_args = tmp.trim();
                 if let Some(err) = fs.rm(cur, true_args) {return Err(err)};
                 return Ok(EvalResult{
                     fdesc: None,
                     stdout: None,
+                    exit: false,
                 })
             },
     
@@ -250,21 +251,23 @@ impl Command {
             CmdType::Mount => {todo!();},
     
             CmdType::Mv => {
-                let tmp1 = self.args[0].iter().collect::<String>();
-                let tmp2 = self.args[1].iter().collect::<String>();
+                let tmp1 = args[0].iter().collect::<String>();
+                let tmp2 = args[1].iter().collect::<String>();
                 if let Some(err) = fs.mv(cur, tmp1.trim(), tmp2.trim()) {return Err(err)};
                 return Ok(EvalResult{
                     fdesc: None,
                     stdout: None,
+                    exit: false,
                 })
             },
     
             CmdType::Write => {
-                let tmp = self.args[0].iter().collect::<String>();
-                if let Some(err) = fs.write(cur, tmp.trim(), &self.args[1]) {return Err(err)};
+                let tmp = args[0].iter().collect::<String>();
+                if let Some(err) = fs.write(cur, tmp.trim(), &args[1]) {return Err(err)};
                 return Ok(EvalResult{
                     fdesc: None,
                     stdout: None,
+                    exit: false,
                 })
             },
     
@@ -272,6 +275,7 @@ impl Command {
                 return Ok(EvalResult{
                     fdesc: None,
                     stdout: None,
+                    exit: true,
                 })
             }
 
@@ -279,15 +283,163 @@ impl Command {
                 return Ok(EvalResult{
                     fdesc: None,
                     stdout: None,
+                    exit: false,
                 })
             },
         }
     }
 }
 
+enum Redirect {
+    Write(Format),
+    Read(Format),
+}
+
+struct Piped {
+    cmd: SimpleCommand,
+    redirect_lst: Vec<Redirect>,
+}
+
+struct Command {
+    cmd: Vec<Piped>
+}
+
+impl Command {
+    fn get_first_word(input: Format) -> (usize, usize) {
+        let mut start = 0;
+
+        while start < input.len() && input[start] == ' ' {
+            start += 1;
+        }
+
+        let mut end = start;
+
+        while end < input.len() && input[end] != ' ' {
+            end += 1;
+        }
+        (start, end)
+    }
+
+    fn parse_piped(input: Format) -> Result<Piped, ParsingErr> {
+        let mut res = Vec::new();
+        let mut start = 0;
+        let mut end = 0;
+        let mut simple_cmd : Option<SimpleCommand> = None;
+
+        while end < input.len() {
+            match input[end] {
+                '>' => {
+                    match SimpleCommand::parse(input[start..end].to_vec()) {
+                        Ok(cmd) => {
+
+                            let (wstart, wend) = Self::get_first_word(input[end+1..].to_vec());
+                            let file = input[wstart..wend].to_vec();
+
+                            simple_cmd = Some(cmd);
+                            res.push(Redirect::Write(file));
+                            start = wend+1;
+                            end = start;
+                        },
+
+                        Err(err) => return Err(err),
+                    }
+                },
+
+                '<' => {
+                    match SimpleCommand::parse(input[start..end].to_vec()) {
+                        Ok(cmd) => {
+
+                            let (wstart, wend) = Self::get_first_word(input[end+1..].to_vec());
+                            let file = input[wstart..wend].to_vec();
+
+                            simple_cmd = Some(cmd);
+                            res.push(Redirect::Read(file));
+                            start = wend+1;
+                            end = start;
+                        },
+                        Err(err) => return Err(err),
+                    }
+                },
+
+                _ => end += 1,
+            }
+        }
+
+        while end < input.len() {
+            match input[end] {
+                ' ' => {start += 1; end += 1},
+
+                '>' => {
+                    let (wstart, wend) = Self::get_first_word(input[end+1..].to_vec());
+                    let file = input[wstart..wend].to_vec();
+                    res.push(Redirect::Write(file));
+                    start = wend+1;
+                    end = start;
+                },
+
+                '<' => {
+                    let (wstart, wend) = Self::get_first_word(input[end+1..].to_vec());
+                    let file = input[wstart..wend].to_vec();
+                    res.push(Redirect::Read(file));
+                    start = wend+1;
+                    end = start;
+
+                },
+
+                _ => return Err(ParsingErr::IncorrectRedirect),
+            }
+        }
+
+        if let Some(cmd) = simple_cmd {
+            Ok(Piped {
+                cmd : cmd,
+                redirect_lst : res
+            })
+
+        } else {
+            Err(ParsingErr::IncorrectRedirect)
+        }
+    }
+
+    fn parse(input: Format) -> Result<Command, ParsingErr> {
+        let mut res = Vec::new();
+        let mut start = 0;
+        let mut end = 0;
+        while end < input.len() {
+            match input[end] {
+                '|' => {
+                    match Self::parse_piped(input[start..end].to_vec()) {
+                        Ok(piped) => {
+                            res.push(piped);
+                            start = end+1;
+                            end = start;
+                        },
+                        Err(err) => return Err(err),
+                    }
+                }
+                _ => end += 1,
+            }
+        }
+
+        match Self::parse_piped(input[end+1..].to_vec()) {
+            Ok(piped) => {
+                res.push(piped);
+            },
+            Err(err) => return Err(err),
+        }
+
+        Ok(Command { cmd: res })
+    }
+
+    fn eval(&self, fs: &mut Fs, cur: &Fdesc) -> Result<EvalResult, FsErr> {
+       todo!(); 
+    }
+}
+
 struct EvalResult {
     fdesc: Option<Fdesc>,
     stdout: Option<Format>,
+    exit: bool
 }
 
 fn print(data : Format){
@@ -332,6 +484,7 @@ fn parsing_handler(err : ParsingErr) {
         ParsingErr::NotEnoughArgs   => "not enough args",
         ParsingErr::TooManyArgs     => "too many args",
         ParsingErr::UnknownCommand  => "unknown command",
+        ParsingErr::IncorrectRedirect => "incorrect syntax for redirect",
     };
     println!("Error : {msg}");
 }
@@ -365,12 +518,12 @@ pub fn setup() {
             Err(err) => {parsing_handler(err); continue}
         };
 
-        if let CmdType::Exit = cmd.name {break};
-
         let result = match cmd.eval(&mut fs, &cur_desc) {
             Err(err) => {fs_handler(err); continue},
             Ok(res) => res
         };
+
+        if result.exit {break};
 
         if let Some(fdesc) = result.fdesc {cur_desc = fdesc};
         if let Some(fmt) = result.stdout {print(fmt)};
