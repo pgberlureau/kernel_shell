@@ -28,6 +28,7 @@ enum CmdType {
     Rmdir,
     Touch,
     Write,
+    Exit,
 }
 
 fn split(input: &Format) -> Vec<Format> {
@@ -152,6 +153,15 @@ impl Command {
     
                 Ok(Command {name: CmdType::Write, args: input[1..].to_vec()})
             },
+
+            "exit" => {
+                if input.len() == 1 {
+                    return Ok(Command {name: CmdType::Exit, args: vec![]});
+                }
+                else {
+                    return Err(ParsingErr::TooManyArgs);
+                }
+            },
     
             _ => Err(ParsingErr::UnknownCommand)
         }
@@ -254,6 +264,13 @@ fn eval(fs: &mut Fs, cmd: Command, cur: &Fdesc) -> Result<EvalResult, FsErr> {
                 stdout: None,
             })
         },
+
+        CmdType::Exit => {
+            return Ok(EvalResult{
+                fdesc: None,
+                stdout: None,
+            })
+        },
     }
 }
 
@@ -278,7 +295,7 @@ fn fs_handler(err : FsErr) {
         FsErr::HdErr(_)     => "error due to hard drive",
         FsErr::InvalidName  => "command has invalids characters",
         FsErr::FileNotFound => "file not found",
-        FsErr::NoDirectory  => "there is no directory",
+        FsErr::NoDirectory  => "this is not a directory",
         FsErr::Occuped      => "refusing to remove '.' or '..' directory",
         FsErr::ReadDir      => "cannot read a directory",
         FsErr::WriteDir     => "cannot write into a directory",
@@ -288,6 +305,7 @@ fn fs_handler(err : FsErr) {
         FsErr::DmapFull     => "disk is full : there is no other free data blocks to write",
         FsErr::UndefBlk     => "block is undefined",
         FsErr::RemoveDir    => "cannot remove a directory",
+        FsErr::InvalidCur   => "the current directory has been removed",
     };
     println!("Error : {msg}");
 }
@@ -330,6 +348,8 @@ pub fn setup() {
             Ok(cmd) => cmd,
             Err(err) => {parsing_handler(err); continue}
         };
+
+        if let CmdType::Exit = cmd.name {break};
 
         let result = match eval(&mut fs, cmd, &cur_desc) {
             Err(err) => {fs_handler(err); continue},

@@ -95,6 +95,12 @@ fn is_alpha_num(c : char) -> bool {
     || (c > 'a' && c < 'z') 
     || (c > '0' && c < '9')
 }
+#[inline(always)]
+fn ceil(a : usize, b : usize) -> usize{
+    if a%b == 0 {a/b}
+    else {a/b + 1}
+}
+
 fn name_from(string : &str) -> Result<[char; MAX_NAME_LEN],FsErr>{
     if string.len() > MAX_NAME_LEN {return Err(FsErr::InvalidName)}
     let mut name = ['\0'; MAX_NAME_LEN];
@@ -120,11 +126,6 @@ fn unsafe_name_from(string : &str) -> [char; MAX_NAME_LEN]{
         k += 1;
     }
     name
-}
-#[inline(always)]
-fn ceil(a : usize, b : usize) -> usize{
-    if a%b == 0 {a/b}
-    else {a/b + 1}
 }
 
 type Block  = [u8;BLK_SIZE];
@@ -165,7 +166,7 @@ impl Bitmap {
         self.bmap[idx/8] = byte;
     }
 
-    #[test] // TODO : delete it
+    #[inline]
     fn is_free(&self, idx : usize) -> bool {
         if idx == BLK_SIZE + 1 {return false}
         let byte = self.bmap[idx/8];
@@ -188,6 +189,7 @@ pub enum FsErr {
     ImapFull,
     DmapFull,
     UndefBlk,
+    InvalidCur,
 }
 
 #[derive(Debug)] // TODO : remove it
@@ -740,6 +742,10 @@ impl <'a> Fs <'a> {
 
 
     fn mkdir__(&mut self, cur : &mut Dir, name : &str) -> Option<FsErr>{
+        // check validity of the current directory
+        let iid = cur_dir.desc.iid;
+        if !self.imap.is_free(iid as usize) {return Some(FsErr::InvalidCur)};
+
         // reject if current directory is full or the name is already used
         if cur.capacity >= FDESC_PER_BLK {return Some(FsErr::DirFull)}
         if let Ok(_) = cur.find_file(name) {return Some(FsErr::FileExist)}
@@ -869,6 +875,10 @@ impl <'a> Fs <'a> {
     }
 
     fn touch__(&mut self, cur_dir : &mut Dir, name : &str)-> Option<FsErr> {
+        // check validity of the current directory
+        let iid = cur_dir.desc.iid;
+        if !self.imap.is_free(iid as usize) {return Some(FsErr::InvalidCur)};
+
         // reject if current directory is full
         if cur_dir.capacity >= FDESC_PER_BLK {return Some(FsErr::DirFull)}
         if let Ok(_) = cur_dir.find_file(name) {return Some(FsErr::FileExist)}
@@ -1086,6 +1096,13 @@ impl<'a> Fs<'a> {
                 Err(err) => return Some(err)
             };
             fd.name_len = new_name.len();
+
+            // case old_dir == new_dir : cannot have 2 fresh desc !
+            if old_dir.desc.iid == new_dir.desc.iid {
+                new_dir.desc_tbl[old_idx] = fd;
+                if let Some(err) = fs.write_dir(new_dir) {return Some(err)};
+                return None
+            }
 
             // find a new emplacement inside the new directory
             let new_idx = match new_dir.find_free() {
