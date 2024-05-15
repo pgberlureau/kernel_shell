@@ -30,7 +30,7 @@ enum CmdType {
     Rm,
     Rmdir,
     Touch,
-    Write,
+    Echo,
     Exit,
     Empty,
 }
@@ -59,9 +59,25 @@ impl SimpleCommand {
             }
             i += 1;
         }
-        res.push(curr);
+
+        if curr.len() > 0 {
+            res.push(curr);
+        }
         res
-    }    
+    }
+
+    fn unsplit(input: &Vec<Format>) -> Format {
+        let mut res = Vec::new();
+        
+        for w in input {
+            for &c in w {
+                res.push(c);
+            }
+            res.push(' ');
+        }
+
+        res
+    }
 
     fn parse(input: Format) -> Result<SimpleCommand, ParsingErr> {
         let input = Self::split(&input);
@@ -136,15 +152,9 @@ impl SimpleCommand {
                 Ok(SimpleCommand {name: CmdType::Touch, args: if input.len() == 1 {None} else {Some(input[1..].to_vec())}})
             },
     
-            "write" => {
-                if input.len() == 2 {
-                    return Err(ParsingErr::NotEnoughArgs);
-                }
-                if input.len() > 3 {
-                    return Err(ParsingErr::TooManyArgs);
-                }
-    
-                Ok(SimpleCommand {name: CmdType::Write, args: if input.len() == 1 {None} else {Some(input[1..].to_vec())}})
+            "echo" => {
+
+                Ok(SimpleCommand {name: CmdType::Echo, args: if input.len() == 1 {None} else {Some(input[1..].to_vec())}})
             },
 
             "exit" => {
@@ -261,12 +271,12 @@ impl SimpleCommand {
                 })
             },
     
-            CmdType::Write => {
-                let tmp = args[0].iter().collect::<String>();
-                if let Some(err) = fs.write(cur, tmp.trim(), &args[1]) {return Err(err)};
+            CmdType::Echo => {//TODO
+                let mut res = Self::unsplit(&args); 
+                res.push('\n');
                 return Ok(EvalResult{
                     fdesc: None,
-                    stdout: None,
+                    stdout: if args.len() > 0 { Some(res) } else { None },
                     exit: false,
                 })
             },
@@ -297,7 +307,7 @@ enum Redirect {
 
 struct Piped {
     cmd: SimpleCommand,
-    redirect_lst: Vec<Redirect>,
+    redirects: Vec<Redirect>,
 }
 
 struct Command {
@@ -305,7 +315,7 @@ struct Command {
 }
 
 impl Command {
-    fn get_first_word(input: Format) -> (usize, usize) {
+    fn get_first_word(input: Format, offset: usize) -> (usize, usize) {
         let mut start = 0;
 
         while start < input.len() && input[start] == ' ' {
@@ -317,7 +327,7 @@ impl Command {
         while end < input.len() && input[end] != ' ' {
             end += 1;
         }
-        (start, end)
+        (start+offset, end+offset)
     }
 
     fn parse_piped(input: Format) -> Result<Piped, ParsingErr> {
@@ -332,13 +342,14 @@ impl Command {
                     match SimpleCommand::parse(input[start..end].to_vec()) {
                         Ok(cmd) => {
 
-                            let (wstart, wend) = Self::get_first_word(input[end+1..].to_vec());
+                            let (wstart, wend) = Self::get_first_word(input[end+1..].to_vec(), end+1);
                             let file = input[wstart..wend].to_vec();
 
                             simple_cmd = Some(cmd);
                             res.push(Redirect::Write(file));
                             start = wend+1;
                             end = start;
+                            break;
                         },
 
                         Err(err) => return Err(err),
@@ -349,13 +360,14 @@ impl Command {
                     match SimpleCommand::parse(input[start..end].to_vec()) {
                         Ok(cmd) => {
 
-                            let (wstart, wend) = Self::get_first_word(input[end+1..].to_vec());
+                            let (wstart, wend) = Self::get_first_word(input[end+1..].to_vec(), end+1);
                             let file = input[wstart..wend].to_vec();
 
                             simple_cmd = Some(cmd);
                             res.push(Redirect::Read(file));
                             start = wend+1;
                             end = start;
+                            break;
                         },
                         Err(err) => return Err(err),
                     }
@@ -364,13 +376,24 @@ impl Command {
                 _ => end += 1,
             }
         }
+        
+        if let None = simple_cmd {
+            match SimpleCommand::parse(input) {
+                Err(err) => return Err(err),
+
+                Ok(cmd) => return Ok(Piped {
+                            cmd: cmd,
+                            redirects: res,
+                        }),
+            }
+        }
 
         while end < input.len() {
             match input[end] {
                 ' ' => {start += 1; end += 1},
 
                 '>' => {
-                    let (wstart, wend) = Self::get_first_word(input[end+1..].to_vec());
+                    let (wstart, wend) = Self::get_first_word(input[end+1..].to_vec(), end+1);
                     let file = input[wstart..wend].to_vec();
                     res.push(Redirect::Write(file));
                     start = wend+1;
@@ -378,7 +401,7 @@ impl Command {
                 },
 
                 '<' => {
-                    let (wstart, wend) = Self::get_first_word(input[end+1..].to_vec());
+                    let (wstart, wend) = Self::get_first_word(input[end+1..].to_vec(), end+1);
                     let file = input[wstart..wend].to_vec();
                     res.push(Redirect::Read(file));
                     start = wend+1;
@@ -390,15 +413,10 @@ impl Command {
             }
         }
 
-        if let Some(cmd) = simple_cmd {
-            Ok(Piped {
-                cmd : cmd,
-                redirect_lst : res
-            })
-
-        } else {
-            Err(ParsingErr::IncorrectRedirect)
-        }
+        Ok(Piped {
+            cmd: simple_cmd.unwrap(),
+            redirects: res,
+        })
     }
 
     fn parse(input: Format) -> Result<Command, ParsingErr> {
@@ -421,7 +439,7 @@ impl Command {
             }
         }
 
-        match Self::parse_piped(input[end+1..].to_vec()) {
+        match Self::parse_piped(input[start..].to_vec()) {
             Ok(piped) => {
                 res.push(piped);
             },
@@ -431,8 +449,75 @@ impl Command {
         Ok(Command { cmd: res })
     }
 
+    fn first_input(redirects: &Vec<Redirect>) -> Option<Format> {
+        for c in redirects {
+            if let Redirect::Read(f) = c {
+                return Some(f.clone());
+            }
+        }
+
+        None
+    }
+
+    fn first_output(redirects: &Vec<Redirect>) -> Option<Format> {
+        for c in redirects {
+            if let Redirect::Write(f) = c {
+                return Some(f.clone());
+            }
+        }
+
+        None
+    }
+
     fn eval(&self, fs: &mut Fs, cur: &Fdesc) -> Result<EvalResult, FsErr> {
-       todo!(); 
+        let mut buff : Option<Format> = None;
+        let mut fdesc = None;
+
+        for piped in &self.cmd {
+            
+            match piped.cmd.name {
+                CmdType::Exit => return Ok( EvalResult {
+                    stdout: None,
+                    fdesc: None,
+                    exit: true,
+                }),
+
+                _ => (),
+            }
+
+            let mut input : Option<Format> = Self::first_input(&piped.redirects);
+
+            if let None = input {
+                input = buff.clone();
+            }
+
+            match piped.cmd.eval(fs, cur, &input.or(Some(Vec::new())).unwrap()) {
+                Err(err) => return Err(err),
+
+                Ok(res) => {
+                    let output = if let Some(out) = Self::first_output(&piped.redirects) {
+                        let tmp = out.iter().collect::<String>();
+                        if let Some(err) = fs.write(cur, tmp.trim(), &res.stdout.or(Some(Vec::new())).unwrap()) {
+                            return Err(err);
+                        } else {
+                            buff = None;
+                        }
+                    } else {
+                        buff = res.stdout;
+
+                        if let Some(_) = res.fdesc {
+                            fdesc = res.fdesc;
+                        }
+                    };
+                },
+            }
+        }
+
+        Ok( EvalResult {
+            stdout : buff,
+            fdesc : fdesc,
+            exit: false,
+        })
     }
 }
 
