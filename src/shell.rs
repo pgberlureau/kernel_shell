@@ -11,8 +11,6 @@ use fs::hd::Hd;
 use std::io;
 use std::io::Write;
 
-const STD_SIZE : usize = 0x1000;
-
 enum ParsingErr {
     NotEnoughArgs,
     TooManyArgs,
@@ -493,7 +491,7 @@ impl Command {
                 Err(err) => return Err(err),
 
                 Ok(res) => {
-                    let output = if let Some(out) = Self::first_output(&piped.redirects) {
+                    let _output = if let Some(out) = Self::first_output(&piped.redirects) {
                         let tmp = out.iter().collect::<String>();
                         if let Some(err) = fs.write(cur, tmp.trim(), &res.stdout.clone().or(Some(Vec::new())).unwrap()) {
                             match err {
