@@ -497,8 +497,15 @@ impl Command {
                 Ok(res) => {
                     let output = if let Some(out) = Self::first_output(&piped.redirects) {
                         let tmp = out.iter().collect::<String>();
-                        if let Some(err) = fs.write(cur, tmp.trim(), &res.stdout.or(Some(Vec::new())).unwrap()) {
-                            return Err(err);
+                        if let Some(err) = fs.write(cur, tmp.trim(), &res.stdout.clone().or(Some(Vec::new())).unwrap()) {
+                            match err {
+                                FsErr::FileNotFound => {
+                                    if let Some(err) = fs.touch(cur, tmp.trim()) {return Err(err)};
+                                    if let Some(err) = fs.write(cur, tmp.trim(), &res.stdout.or(Some(Vec::new())).unwrap()) {return Err(err)};
+                                },
+
+                                _ => return Err(err),
+                            }
                         } else {
                             buff = None;
                         }
