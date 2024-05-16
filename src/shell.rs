@@ -35,8 +35,6 @@ enum CmdType {
     Empty,
 }
 
-
-
 struct SimpleCommand {
     name: CmdType,
     args: Option<Vec<Format>>,
