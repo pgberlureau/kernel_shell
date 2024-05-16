@@ -17,6 +17,7 @@ enum ParsingErr {
     UnknownCommand,
     IncorrectRedirect,
 }
+
 enum CmdType {
     Cat,
     Cd,
