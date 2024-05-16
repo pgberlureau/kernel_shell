@@ -28,6 +28,7 @@ enum CmdType {
     Rm,
     Rmdir,
     Touch,
+    Grep,
     Echo,
     Exit,
     Empty,
@@ -122,6 +123,18 @@ impl SimpleCommand {
                 }
     
                 Ok(SimpleCommand {name: CmdType::Mv, args: if input.len() == 1  {None} else {Some(input[1..].to_vec())}})
+            },
+
+            "grep" => {
+                if input.len() == 2 {
+                    return Err(ParsingErr::NotEnoughArgs);
+                }
+
+                if input.len() > 3 {
+                    return Err(ParsingErr::TooManyArgs);
+                }
+    
+                Ok(SimpleCommand {name: CmdType::Grep, args: if input.len() == 1  {None} else {Some(input[1..].to_vec())}})
             },
     
             "rm" => {
@@ -263,6 +276,17 @@ impl SimpleCommand {
                 return Ok(EvalResult{
                     fdesc: None,
                     stdout: None,
+                    exit: false,
+                })
+            },
+
+            CmdType::Grep => {
+                let tmp1 = args[0].iter().collect::<String>();
+                let tmp2 = args[1].iter().collect::<String>();
+                let res = fs.grep(cur, tmp2.trim(), tmp1.trim())?;
+                return Ok(EvalResult{
+                    fdesc: None,
+                    stdout: Some(res),
                     exit: false,
                 })
             },
@@ -591,6 +615,17 @@ pub fn setup() {
     }
     
     let mut cur_desc = fs.get_home_fdesc();
+
+    // TEST OF GREP (setup a file named 'file' with a sentence inside)
+    let cmd = match Command::parse(fmt_from("echo hello world pattern toto bibli ! > file".trim())) {
+        Ok(cmd) => cmd,
+        Err(err) => {parsing_handler(err);panic!("TEST SETUP FAILED !")}
+    };
+
+    if let Err(err) = cmd.eval(&mut fs, &cur_desc) {fs_handler(err);panic!("TEST SETUP FAILED !")};
+
+    println!("SUCCESSFULL SETUP");
+    //
 
     loop {
         print!("> ");
