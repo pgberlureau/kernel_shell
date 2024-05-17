@@ -300,7 +300,6 @@ impl SimpleCommand {
     
             CmdType::Echo => {//TODO
                 let res = Self::unsplit(&args); 
-                //res.push('\n');
                 return Ok(EvalResult{
                     fdesc: None,
                     stdout: if args.len() > 0 { Some(res) } else { None },
