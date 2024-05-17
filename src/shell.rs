@@ -16,6 +16,8 @@ enum ParsingErr {
     TooManyArgs,
     UnknownCommand,
     IncorrectRedirect,
+    MultipleInputs,
+    MultipleOutputs,
 }
 
 enum CmdType {
@@ -79,6 +81,7 @@ impl SimpleCommand {
 
     fn parse(input: Format) -> Result<SimpleCommand, ParsingErr> {
         let input = Self::split(&input);
+
         match input[0].iter().collect::<String>().as_str().trim() {
             //TODO deeper checks of args
             "cat" => { 
@@ -182,15 +185,15 @@ impl SimpleCommand {
 
     fn eval(&self, fs: &mut Fs, cur: &Fdesc, stdin: &Format) -> Result<EvalResult, FsErr> {
         let mut splitted_stdin = Self::split(&stdin);
-
-        let mut args = if let Some(args) = &self.args { 
+        
+        let args = if let Some(args) = &self.args { 
             let mut res = args.clone();
             res.append(&mut splitted_stdin);
             res
         } else { 
             splitted_stdin 
         };
-    
+        
         match self.name {
             CmdType::Cd => {
                 let tmp : String;
@@ -296,7 +299,7 @@ impl SimpleCommand {
             },
     
             CmdType::Echo => {//TODO
-                let mut res = Self::unsplit(&args); 
+                let res = Self::unsplit(&args); 
                 //res.push('\n');
                 return Ok(EvalResult{
                     fdesc: None,
@@ -359,6 +362,8 @@ impl Command {
         let mut start = 0;
         let mut end = 0;
         let mut simple_cmd : Option<SimpleCommand> = None;
+        let mut input_nb : usize = 0;
+        let mut output_nb : usize = 0;
 
         while end < input.len() {
             match input[end] {
@@ -373,6 +378,7 @@ impl Command {
                             res.push(Redirect::Write(file));
                             start = wend+1;
                             end = start;
+                            output_nb += 1;
                             break;
                         },
 
@@ -391,6 +397,7 @@ impl Command {
                             res.push(Redirect::Read(file));
                             start = wend+1;
                             end = start;
+                            input_nb += 1;
                             break;
                         },
                         Err(err) => return Err(err),
@@ -422,6 +429,10 @@ impl Command {
                     res.push(Redirect::Write(file));
                     start = wend+1;
                     end = start;
+                    output_nb += 1;
+                    if output_nb > 1 {
+                        return Err(ParsingErr::MultipleOutputs);
+                    }
                 },
 
                 '<' => {
@@ -430,6 +441,10 @@ impl Command {
                     res.push(Redirect::Read(file));
                     start = wend+1;
                     end = start;
+                    input_nb += 1;
+                    if input_nb > 1 {
+                        return Err(ParsingErr::MultipleInputs);
+                    }
 
                 },
 
@@ -494,54 +509,72 @@ impl Command {
     }
 
     fn eval(&self, fs: &mut Fs, cur: &Fdesc) -> Result<EvalResult, FsErr> {
-        let mut buff : Option<Format> = None;
+        for i in 0..self.cmd.len()-1 {
+            if let Err(err) = self.eval_aux(fs, cur, i) {return Err(err)};
+        }
+        self.eval_aux(fs, cur, self.cmd.len()-1)
+    }
+
+    fn eval_aux(&self, fs: &mut Fs, cur: &Fdesc, index: usize) -> Result<EvalResult, FsErr> {
+        let from_pipe = index > 0;
+        let to_pipe = index < self.cmd.len()-1;
+        let piped = &self.cmd[index];
+
+        match piped.cmd.name {
+            CmdType::Exit => return Ok( EvalResult {
+                stdout: None,
+                fdesc: None,
+                exit: true,
+            }),
+
+            _ => (),
+        }
+        
+        let mut buff = None;
         let mut fdesc = None;
 
-        for piped in &self.cmd {
-            
-            match piped.cmd.name {
-                CmdType::Exit => return Ok( EvalResult {
-                    stdout: None,
-                    fdesc: None,
-                    exit: true,
-                }),
+        let mut input : Option<Format> = Self::first_input(&piped.redirects);
 
-                _ => (),
-            }
-
-            let mut input : Option<Format> = Self::first_input(&piped.redirects);
-
+        if from_pipe {
             if let None = input {
-                input = buff.clone();
+                input = Some(vec!['_','_','t','m','p']);
             }
+        }
 
-            match piped.cmd.eval(fs, cur, &input.or(Some(Vec::new())).unwrap()) {
-                Err(err) => return Err(err),
+        match piped.cmd.eval(fs, cur, &input.or(Some(Vec::new())).unwrap()) {
+            Err(err) => return Err(err),
 
-                Ok(res) => {
-                    let _output = if let Some(out) = Self::first_output(&piped.redirects) {
-                        let tmp = out.iter().collect::<String>();
-                        if let Some(err) = fs.write(cur, tmp.trim(), &res.stdout.clone().or(Some(Vec::new())).unwrap()) {
-                            match err {
-                                FsErr::FileNotFound => {
-                                    if let Some(err) = fs.touch(cur, tmp.trim()) {return Err(err)};
-                                    if let Some(err) = fs.write(cur, tmp.trim(), &res.stdout.or(Some(Vec::new())).unwrap()) {return Err(err)};
-                                },
+            Ok(res) => {
+                if from_pipe {
+                    if let Some(err) = fs.rm(cur, "__tmp") {return Err(err)};
+                }
 
-                                _ => return Err(err),
-                            }
-                        } else {
-                            buff = None;
+                if let Some(out) = Self::first_output(&piped.redirects) {
+                    let tmp = out.iter().collect::<String>();
+                    if let Some(err) = fs.write(cur, tmp.trim(), &res.stdout.clone().or(Some(Vec::new())).unwrap()) {
+                        match err {
+                            FsErr::FileNotFound => {
+                                if let Some(err) = fs.touch(cur, tmp.trim()) {return Err(err)};
+                                if let Some(err) = fs.write(cur, tmp.trim(), &res.stdout.or(Some(Vec::new())).unwrap()) {return Err(err)};
+                            },
+
+                            _ => return Err(err),
                         }
                     } else {
+                        buff = None;
+                    }
+                } else {
+                    if to_pipe {
+                        if let Some(err) = fs.touch(cur, "__tmp") {return Err(err)};
+                        if let Some(err) = fs.write(cur, "__tmp", &res.stdout.or(Some(Vec::new())).unwrap()) {return Err(err)};
+                    } else {
                         buff = res.stdout;
-
-                        if let Some(_) = res.fdesc {
-                            fdesc = res.fdesc;
-                        }
-                    };
-                },
-            }
+                    }
+                    if let Some(_) = res.fdesc {
+                        fdesc = res.fdesc;
+                    }
+                };
+            },
         }
 
         Ok( EvalResult {
@@ -601,6 +634,8 @@ fn parsing_handler(err : ParsingErr) {
         ParsingErr::TooManyArgs     => "too many args",
         ParsingErr::UnknownCommand  => "unknown command",
         ParsingErr::IncorrectRedirect => "incorrect syntax for redirect",
+        ParsingErr::MultipleInputs => "at most one input should be specifided",
+        ParsingErr::MultipleOutputs => "at most one output should be specifided",
     };
     println!("Error : {msg}");
 }
