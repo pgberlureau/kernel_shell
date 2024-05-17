@@ -994,7 +994,7 @@ impl <'a> Fs <'a> {
             let blk = self.read_fblk(iid,k)?;
             for l in 0..BLK_SIZE{
                 let c = blk[l] as char;
-                if c == '\0' {/*v.push('\n');*/ return Ok(v)}
+                if c == '\0' {v.push('\n'); return Ok(v)}
                 v.push(c);
             }
         }

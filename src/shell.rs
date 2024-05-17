@@ -79,7 +79,7 @@ impl SimpleCommand {
 
     fn parse(input: Format) -> Result<SimpleCommand, ParsingErr> {
         let input = Self::split(&input);
-        match input[0].iter().collect::<String>().as_str() {
+        match input[0].iter().collect::<String>().as_str().trim() {
             //TODO deeper checks of args
             "cat" => { 
                 if input.len() > 2 {
@@ -186,9 +186,8 @@ impl SimpleCommand {
 
     fn eval(&self, fs: &mut Fs, cur: &Fdesc, stdin: &Format) -> Result<EvalResult, FsErr> {
         let args = if let Some(args) = &self.args { args.clone() } else { Self::split(&stdin) };
-
-        match self.name {
     
+        match self.name {
             CmdType::Cd => {
                 let tmp : String;
                 let true_args = if args.len() == 0 {"/"} else {tmp = args[0].iter().collect::<String>(); tmp.trim()};
@@ -294,7 +293,7 @@ impl SimpleCommand {
     
             CmdType::Echo => {//TODO
                 let mut res = Self::unsplit(&args); 
-                res.push('\n');
+                //res.push('\n');
                 return Ok(EvalResult{
                     fdesc: None,
                     stdout: if args.len() > 0 { Some(res) } else { None },
@@ -618,7 +617,7 @@ pub fn setup() {
     let mut cur_desc = fs.get_home_fdesc();
 
     // TEST OF GREP (setup a file named 'file' with a sentence inside)
-    let cmd = match Command::parse(fmt_from("echo hello world pattern toto bibli ! > file".trim())) {
+    let cmd = match Command::parse(fmt_from("echo hello world pattern toto bibli ! > file")) {
         Ok(cmd) => cmd,
         Err(err) => {parsing_handler(err);panic!("TEST SETUP FAILED !")}
     };
@@ -637,7 +636,7 @@ pub fn setup() {
             .read_line(&mut input)
             .expect("Error : failed to read line");
         
-        let cmd = match Command::parse(fmt_from(input.as_str().trim())) {
+        let cmd = match Command::parse(fmt_from(input.as_str())) {
             Ok(cmd) => cmd,
             Err(err) => {parsing_handler(err); continue}
         };
