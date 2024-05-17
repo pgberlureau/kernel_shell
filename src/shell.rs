@@ -127,10 +127,6 @@ impl SimpleCommand {
             },
 
             "grep" => {
-                if input.len() == 2 {
-                    return Err(ParsingErr::NotEnoughArgs);
-                }
-
                 if input.len() > 3 {
                     return Err(ParsingErr::TooManyArgs);
                 }
@@ -185,7 +181,15 @@ impl SimpleCommand {
     }
 
     fn eval(&self, fs: &mut Fs, cur: &Fdesc, stdin: &Format) -> Result<EvalResult, FsErr> {
-        let args = if let Some(args) = &self.args { args.clone() } else { Self::split(&stdin) };
+        let mut splitted_stdin = Self::split(&stdin);
+
+        let mut args = if let Some(args) = &self.args { 
+            let mut res = args.clone();
+            res.append(&mut splitted_stdin);
+            res
+        } else { 
+            splitted_stdin 
+        };
     
         match self.name {
             CmdType::Cd => {
