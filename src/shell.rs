@@ -513,7 +513,7 @@ impl Command {
         Ok(Command { cmd: res })
     }
 
-    fn first_input(redirects: &Vec<Redirect>) -> Option<Format> {
+    fn get_input(redirects: &Vec<Redirect>) -> Option<Format> {
         for c in redirects {
             if let Redirect::Read(f) = c {
                 return Some(f.clone());
@@ -523,7 +523,7 @@ impl Command {
         None
     }
 
-    fn first_output(redirects: &Vec<Redirect>) -> Option<Format> {
+    fn get_output(redirects: &Vec<Redirect>) -> Option<Format> {
         for c in redirects {
             if let Redirect::Write(f) = c {
                 return Some(f.clone());
@@ -534,21 +534,56 @@ impl Command {
     }
 
     fn eval_bis(&mut self, fs: &mut Fs, cur: &Fdesc) -> Result<EvalResult, FsErr> {
-        if self.cmd.len() == 1 {return Ok(self.cmd[0].cmd.eval(fs,cur, &vec![])?)};
+        let last = &self.cmd.pop().unwrap();
 
-        let last = self.cmd.pop().unwrap().cmd;
-        match self.eval_bis(fs,cur)?.stdout {
-            None => Ok(last.eval(fs,cur,&vec![])?),
-            Some(stdout) => {
-                if let Some(err) = fs.touch(cur,"__tmp") {return Err(err)};
-                if let Some(err) = fs.write(cur,"__tmp",&stdout) {return Err(err)};
-                let res = Ok(last.eval(fs,cur,&vec!['_','_','t','m','p'])?);
-                if let Some(err) = fs.rm(cur, "__tmp") {return Err(err)};
-                res
+        let res = if self.cmd.len() == 0 { //No input given
+            if let Some(input) = Self::get_input(&last.redirects) {
+                Ok(last.cmd.eval(fs,cur, &input)?)
+            } else {
+                Ok(last.cmd.eval(fs,cur, &vec![])?)
             }
+        } else {
+            match self.eval_bis(fs,cur)?.stdout {
+                None => Ok(last.cmd.eval(fs,cur,&vec![])?),
+                Some(stdout) => {
+                    if let Some(input) = Self::get_input(&last.redirects) { //Input takes priority over pipe
+                        Ok(last.cmd.eval(fs,cur,&input)?)
+
+                    } else { //No input given
+                        if let Some(err) = fs.touch(cur,"__tmp") {return Err(err)};
+                        if let Some(err) = fs.write(cur,"__tmp", &stdout) {return Err(err)};
+                        let res = Ok(last.cmd.eval(fs,cur,&vec!['_','_','t','m','p'])?);
+                        if let Some(err) = fs.rm(cur, "__tmp") {return Err(err)};
+                        res
+                    }
+                }
+            }
+        };
+        //We can't return before because there might be an output specified
+
+        if let Some(output) = Self::get_output(&last.redirects) { //Output takes priority over pipe
+
+            let output_name = output.iter().collect::<String>(); //Converting output Vec<format> to String
+
+            let next_stdout = res.unwrap().stdout.clone();
+            println!("{:?}", next_stdout);
+            if let Some(_) = fs.write(cur, output_name.trim(), &next_stdout.clone().or(Some(Vec::new())).unwrap()) { //Handling existing file
+                if let Some(err) = fs.touch(cur, output_name.trim()) {return Err(err)};
+                if let Some(err) = fs.write(cur, output_name.trim(), &next_stdout.clone().or(Some(Vec::new())).unwrap()) {return Err(err)};
+            }
+
+            Ok( EvalResult {
+                stdout: None,
+                fdesc: None,
+                exit: false,
+            })
+
+        } else { //No output given
+            res
         }
     }
 
+    /*
     fn eval(&self, fs: &mut Fs, cur: &Fdesc) -> Result<EvalResult, FsErr> {
         for i in 0..self.cmd.len()-1 {
             if let Err(err) = self.eval_aux(fs, cur, i) {return Err(err)};
@@ -624,6 +659,7 @@ impl Command {
             exit: false,
         })
     }
+    */
 }
 
 struct EvalResult {
@@ -698,12 +734,12 @@ pub fn setup() {
     let mut cur_desc = fs.get_home_fdesc();
 
     // TEST OF GREP (setup a file named 'file' with a sentence inside)
-    let cmd = match Command::parse(fmt_from("echo hello world pattern toto bibli ! > file")) {
+    let mut cmd = match Command::parse_bis(fmt_from("echo hello world pattern toto bibli ! > file")) {
         Ok(cmd) => cmd,
         Err(err) => {parsing_handler(err);panic!("TEST SETUP FAILED !")}
     };
 
-    if let Err(err) = cmd.eval(&mut fs, &cur_desc) {fs_handler(err);panic!("TEST SETUP FAILED !")};
+    if let Err(err) = cmd.eval_bis(&mut fs, &cur_desc) {fs_handler(err);panic!("TEST SETUP FAILED !")};
 
     println!("SUCCESSFULL SETUP");
     //
