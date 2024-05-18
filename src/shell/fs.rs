@@ -1356,7 +1356,7 @@ impl<'a> Fs<'a> {
         let mut start = 0; let mut end = 0;
         let mut res = vec![];
         while end < content.len() {
-            if content[end] == ' ' {start = end+1;}
+            if (content[end] == ' ') || (content[end] == '\n') {start = end+1;}
 
             else if content[end] == pattern[0] {
                 if end + pattern.len() > content.len() {break}
@@ -1368,7 +1368,7 @@ impl<'a> Fs<'a> {
                 if k == pattern.len() {
                     end += k;
                     while end < content.len() {
-                        if content[end] == ' ' {break}
+                        if (content[end] == ' ') || (content[end] == '\n') {break}
                         end += 1;
                     }
                     for l in start..end{

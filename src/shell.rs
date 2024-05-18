@@ -11,6 +11,7 @@ use fs::hd::Hd;
 use std::io;
 use std::io::Write;
 
+#[derive(Debug)]
 enum ParsingErr {
     NotEnoughArgs,
     TooManyArgs,
@@ -20,6 +21,7 @@ enum ParsingErr {
     MultipleOutputs,
 }
 
+#[derive(Debug)]
 enum CmdType {
     Cat,
     Cd,
@@ -37,6 +39,7 @@ enum CmdType {
     Empty,
 }
 
+#[derive(Debug)]
 struct SimpleCommand {
     name: CmdType,
     args: Option<Vec<Format>>,
@@ -81,6 +84,8 @@ impl SimpleCommand {
 
     fn parse(input: Format) -> Result<SimpleCommand, ParsingErr> {
         let input = Self::split(&input);
+
+        if input.len() == 0 {return Ok(SimpleCommand {name: CmdType::Empty, args: None});}
 
         match input[0].iter().collect::<String>().as_str().trim() {
             //TODO deeper checks of args
@@ -326,16 +331,20 @@ impl SimpleCommand {
     }
 }
 
+#[derive(Debug)]
 enum Redirect {
     Write(Format),
     Read(Format),
 }
 
+#[derive(Debug)]
 struct Piped {
     cmd: SimpleCommand,
     redirects: Vec<Redirect>,
 }
 
+// WHY HAVE JUST 1 FIELD NAMED AS THE STRUCT? (type Command = Vec<Piped> is enough ???)
+#[derive(Debug)]
 struct Command {
     cmd: Vec<Piped>
 }
@@ -410,11 +419,10 @@ impl Command {
         if let None = simple_cmd {
             match SimpleCommand::parse(input) {
                 Err(err) => return Err(err),
-
                 Ok(cmd) => return Ok(Piped {
-                            cmd: cmd,
-                            redirects: res,
-                        }),
+                    cmd: cmd,
+                    redirects: res,
+                }),
             }
         }
 
@@ -455,6 +463,24 @@ impl Command {
             cmd: simple_cmd.unwrap(),
             redirects: res,
         })
+    }
+
+    fn parse_bis(input: Format) -> Result<Command, ParsingErr> {
+        let mut end = input.len();
+        while end > 0 {
+            end -= 1;
+            match input[end] {
+                '|' => {
+                    let mut prev = Self::parse_bis(input[..end].to_vec())?;
+                    prev.cmd.push(Self::parse_piped(input[end+1..].to_vec())?);
+                    return Ok(prev);
+                }
+                _ => continue,
+            }
+        }
+        return Ok(Command {
+            cmd : vec![Self::parse_piped(input)?],
+        });
     }
 
     fn parse(input: Format) -> Result<Command, ParsingErr> {
@@ -505,6 +531,22 @@ impl Command {
         }
 
         None
+    }
+
+    fn eval_bis(&mut self, fs: &mut Fs, cur: &Fdesc) -> Result<EvalResult, FsErr> {
+        if self.cmd.len() == 1 {return Ok(self.cmd[0].cmd.eval(fs,cur, &vec![])?)};
+
+        let last = self.cmd.pop().unwrap().cmd;
+        match self.eval_bis(fs,cur)?.stdout {
+            None => Ok(last.eval(fs,cur,&vec![])?),
+            Some(stdout) => {
+                if let Some(err) = fs.touch(cur,"__tmp") {return Err(err)};
+                if let Some(err) = fs.write(cur,"__tmp",&stdout) {return Err(err)};
+                let res = Ok(last.eval(fs,cur,&vec!['_','_','t','m','p'])?);
+                if let Some(err) = fs.rm(cur, "__tmp") {return Err(err)};
+                res
+            }
+        }
     }
 
     fn eval(&self, fs: &mut Fs, cur: &Fdesc) -> Result<EvalResult, FsErr> {
@@ -602,6 +644,7 @@ fn fmt_from(string : &str) -> Format {
     while let Some(c) = buff.next() {
         fmt.push(c);
     }
+    if fmt[fmt.len()-1] == '\n' {fmt.pop();}
     return fmt
 }
 
@@ -674,12 +717,12 @@ pub fn setup() {
             .read_line(&mut input)
             .expect("Error : failed to read line");
         
-        let cmd = match Command::parse(fmt_from(input.as_str())) {
+        let mut cmd = match Command::parse_bis(fmt_from(input.as_str())) {
             Ok(cmd) => cmd,
             Err(err) => {parsing_handler(err); continue}
         };
 
-        let result = match cmd.eval(&mut fs, &cur_desc) {
+        let result = match cmd.eval_bis(&mut fs, &cur_desc) {
             Err(err) => {fs_handler(err); continue},
             Ok(res) => res
         };
