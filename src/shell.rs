@@ -536,12 +536,13 @@ impl Command {
     fn eval_bis(&mut self, fs: &mut Fs, cur: &Fdesc) -> Result<EvalResult, FsErr> {
         let last = &self.cmd.pop().unwrap();
 
-        let res = if self.cmd.len() == 0 { //No input given
-            if let Some(input) = Self::get_input(&last.redirects) {
+        let res = if self.cmd.len() == 0 { //First command of the pipe chain
+            if let Some(input) = Self::get_input(&last.redirects) { //Use an eventual input
                 Ok(last.cmd.eval(fs,cur, &input)?)
             } else {
                 Ok(last.cmd.eval(fs,cur, &vec![])?)
             }
+
         } else {
             match self.eval_bis(fs,cur)?.stdout {
                 None => Ok(last.cmd.eval(fs,cur,&vec![])?),
@@ -565,15 +566,15 @@ impl Command {
 
             let output_name = output.iter().collect::<String>(); //Converting output Vec<format> to String
 
-            let next_stdout = res.unwrap().stdout.clone();
+            let next_stdout = res.unwrap().stdout.clone(); //What we have to write into the specified output
             println!("{:?}", next_stdout);
-            if let Some(_) = fs.write(cur, output_name.trim(), &next_stdout.clone().or(Some(Vec::new())).unwrap()) { //Handling existing file
+            if let Some(_) = fs.write(cur, output_name.trim(), &next_stdout.clone().or(Some(Vec::new())).unwrap()) { //Handling not existing file
                 if let Some(err) = fs.touch(cur, output_name.trim()) {return Err(err)};
                 if let Some(err) = fs.write(cur, output_name.trim(), &next_stdout.clone().or(Some(Vec::new())).unwrap()) {return Err(err)};
             }
 
             Ok( EvalResult {
-                stdout: None,
+                stdout: None, //Stdout lost in redirection
                 fdesc: None,
                 exit: false,
             })
