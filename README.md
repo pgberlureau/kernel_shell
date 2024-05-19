@@ -1,12 +1,9 @@
 # A Very Basic File System
 
-## Arch 
+## Build it :
 
-scr/
-|-- main.rs
-|-- shell
-|   |-- fs
-|   |   |-- hd.rs
-|   |-- fs.rs
-|-- shell.rs
+`cargo build`
 
+## Run it :
+
+`cargo run`

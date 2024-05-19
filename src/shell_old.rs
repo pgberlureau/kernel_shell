@@ -82,18 +82,6 @@ impl SimpleCommand {
         res
     }
 
-    fn add_args(&mut self, stdin: Format) {
-        let mut splitted_stdin = Self::split(&stdin);
-        
-        match self.args.clone() {
-            Some(mut args) => {
-                args.append(&mut splitted_stdin);
-                self.args = Some(args)
-            },
-            None => {self.args = Some(splitted_stdin)}
-        }
-    }
-
     fn parse(input: Format) -> Result<SimpleCommand, ParsingErr> {
         let input = Self::split(&input);
 
@@ -198,14 +186,17 @@ impl SimpleCommand {
     
             _ => Err(ParsingErr::UnknownCommand)
         }
-
     }
 
-    fn eval(&self, fs: &mut Fs, cur: &Fdesc) -> Result<EvalResult, FsErr> {
+    fn eval(&self, fs: &mut Fs, cur: &Fdesc, stdin: &Format) -> Result<EvalResult, FsErr> {
+        let mut splitted_stdin = Self::split(&stdin);
         
-        let args = match &self.args {
-            Some(args) => args.clone(),
-            None => vec![]
+        let args = if let Some(args) = &self.args { 
+            let mut res = args.clone();
+            res.append(&mut splitted_stdin);
+            res
+        } else { 
+            splitted_stdin 
         };
         
         match self.name {
@@ -313,8 +304,7 @@ impl SimpleCommand {
             },
     
             CmdType::Echo => {//TODO
-                let mut res = Self::unsplit(&args); 
-                res.push('\n');
+                let res = Self::unsplit(&args); 
                 return Ok(EvalResult{
                     fdesc: None,
                     stdout: if args.len() > 0 { Some(res) } else { None },
@@ -342,13 +332,24 @@ impl SimpleCommand {
 }
 
 #[derive(Debug)]
-struct Piped {
-    cmd: SimpleCommand,
-    output : Option<Format>,
-    input  : Option<Format>
+enum Redirect {
+    Write(Format),
+    Read(Format),
 }
 
-impl Piped {
+#[derive(Debug)]
+struct Piped {
+    cmd: SimpleCommand,
+    redirects: Vec<Redirect>,
+}
+
+// WHY HAVE JUST 1 FIELD NAMED AS THE STRUCT? (type Command = Vec<Piped> is enough ???)
+#[derive(Debug)]
+struct Command {
+    cmd: Vec<Piped>
+}
+
+impl Command {
     fn get_first_word(input: Format, offset: usize) -> (usize, usize) {
         let mut start = 0;
 
@@ -364,11 +365,13 @@ impl Piped {
         (start+offset, end+offset)
     }
 
-    fn parse(input: Format) -> Result<Self, ParsingErr> {
-        let mut inpt = None; let mut outpt = None;
+    fn parse_piped(input: Format) -> Result<Piped, ParsingErr> {
+        let mut res = Vec::new();
         let mut start = 0;
         let mut end = 0;
-        let mut simple_cmd = None;
+        let mut simple_cmd : Option<SimpleCommand> = None;
+        let mut input_nb : usize = 0;
+        let mut output_nb : usize = 0;
 
         while end < input.len() {
             match input[end] {
@@ -380,9 +383,10 @@ impl Piped {
                             let file = input[wstart..wend].to_vec();
 
                             simple_cmd = Some(cmd);
-                            outpt = Some(file);
+                            res.push(Redirect::Write(file));
                             start = wend+1;
                             end = start;
+                            output_nb += 1;
                             break;
                         },
 
@@ -398,9 +402,10 @@ impl Piped {
                             let file = input[wstart..wend].to_vec();
 
                             simple_cmd = Some(cmd);
-                            inpt = Some(file);
+                            res.push(Redirect::Read(file));
                             start = wend+1;
                             end = start;
+                            input_nb += 1;
                             break;
                         },
                         Err(err) => return Err(err),
@@ -415,9 +420,8 @@ impl Piped {
             match SimpleCommand::parse(input) {
                 Err(err) => return Err(err),
                 Ok(cmd) => return Ok(Piped {
-                    cmd     : cmd,
-                    output  : outpt,
-                    input   : inpt
+                    cmd: cmd,
+                    redirects: res,
                 }),
             }
         }
@@ -427,21 +431,28 @@ impl Piped {
                 ' ' => {start += 1; end += 1},
 
                 '>' => {
-                    if let Some(_) = outpt {return Err(ParsingErr::MultipleOutputs)}
                     let (wstart, wend) = Self::get_first_word(input[end+1..].to_vec(), end+1);
                     let file = input[wstart..wend].to_vec();
-                    outpt = Some(file);
+                    res.push(Redirect::Write(file));
                     start = wend+1;
                     end = start;
+                    output_nb += 1;
+                    if output_nb > 1 {
+                        return Err(ParsingErr::MultipleOutputs);
+                    }
                 },
 
                 '<' => {
-                    if let Some(_) = inpt {return Err(ParsingErr::MultipleInputs);}
                     let (wstart, wend) = Self::get_first_word(input[end+1..].to_vec(), end+1);
                     let file = input[wstart..wend].to_vec();
-                    inpt = Some(file);
+                    res.push(Redirect::Read(file));
                     start = wend+1;
                     end = start;
+                    input_nb += 1;
+                    if input_nb > 1 {
+                        return Err(ParsingErr::MultipleInputs);
+                    }
+
                 },
 
                 _ => return Err(ParsingErr::IncorrectRedirect),
@@ -449,84 +460,208 @@ impl Piped {
         }
 
         Ok(Piped {
-            cmd     : simple_cmd.unwrap(),
-            output  : outpt,
-            input   : inpt
+            cmd: simple_cmd.unwrap(),
+            redirects: res,
         })
     }
 
-    fn eval(&mut self, fs: &mut Fs, cur: &Fdesc) -> Result<EvalResult, FsErr> {
-        let empty_res = Ok( EvalResult {
-            stdout: None,
-            fdesc: None,
-            exit: false,
-        });
-
-        let res = if let Some(input) = self.input.clone() {
-            self.cmd.add_args(input);
-            self.cmd.eval(fs,cur)?
-        }
-        else {self.cmd.eval(fs,cur)?};
-
-        if let Some(output) = &self.output {
-            let output_name = output.iter().collect::<String>();
-            let output_name = output_name.trim();
-            let mut stdout = if let Some(stdout) = res.stdout {stdout} else {vec![]};
-            stdout.pop();
-            match fs.write(cur, &output_name, &stdout) {
-                Some(FsErr::FileNotFound) => {
-                    if let Some(err) = fs.touch(cur, &output_name) {return Err(err)};
-                    if let Some(err) = fs.write(cur, &output_name, &stdout) {return Err(err)};
-                    return empty_res
-                },
-                Some(err) => return Err(err),
-                None => return empty_res
-            }
-        }
-        return Ok(res)
-    }
-}
-
-type Command = Vec<Piped>;
-trait Exec {
-    fn parse(input: Format) -> Result<Self, ParsingErr> where Self: Sized;
-    fn eval(&mut self, fs: &mut Fs, cur: &Fdesc) -> Result<EvalResult, FsErr>;
-}
-
-impl Exec for Command {
-    fn parse(input: Format) -> Result<Self, ParsingErr> {
+    fn parse_bis(input: Format) -> Result<Command, ParsingErr> {
         let mut end = input.len();
         while end > 0 {
             end -= 1;
             match input[end] {
                 '|' => {
-                    let mut prev = Self::parse(input[..end].to_vec())?;
-                    prev.push(Piped::parse(input[end+1..].to_vec())?);
+                    let mut prev = Self::parse_bis(input[..end].to_vec())?;
+                    prev.cmd.push(Self::parse_piped(input[end+1..].to_vec())?);
                     return Ok(prev);
                 }
                 _ => continue,
             }
         }
-        return Ok(vec![Piped::parse(input)?]);
+        return Ok(Command {
+            cmd : vec![Self::parse_piped(input)?],
+        });
     }
 
-    fn eval(&mut self, fs: &mut Fs, cur: &Fdesc) -> Result<EvalResult, FsErr> {
-        if self.len() == 1 {return Ok(self[0].eval(fs,cur)?)};
-
-        let mut last = self.pop().unwrap();
-        match self.eval(fs,cur)?.stdout {
-            None => Ok(last.eval(fs,cur)?),
-            Some(mut stdout) => {
-                stdout.pop();
-                if let Some(err) = fs.touch(cur,"__tmp") {return Err(err)};
-                if let Some(err) = fs.write(cur,"__tmp",&stdout) {return Err(err)};
-                last.cmd.add_args(vec!['_','_','t','m','p']);
-                let res = Ok(last.eval(fs,cur)?);
-                if let Some(err) = fs.rm(cur, "__tmp") {return Err(err)};
-                res
+    /*
+    fn parse(input: Format) -> Result<Command, ParsingErr> {
+        let mut res = Vec::new();
+        let mut start = 0;
+        let mut end = 0;
+        while end < input.len() {
+            match input[end] {
+                '|' => {
+                    match Self::parse_piped(input[start..end].to_vec()) {
+                        Ok(piped) => {
+                            res.push(piped);
+                            start = end+1;
+                            end = start;
+                        },
+                        Err(err) => return Err(err),
+                    }
+                }
+                _ => end += 1,
             }
         }
+
+        match Self::parse_piped(input[start..].to_vec()) {
+            Ok(piped) => {
+                res.push(piped);
+            },
+            Err(err) => return Err(err),
+        }
+
+        Ok(Command { cmd: res })
     }
+    */
+
+    fn get_input(redirects: &Vec<Redirect>) -> Option<Format> {
+        for c in redirects {
+            if let Redirect::Read(f) = c {
+                return Some(f.clone());
+            }
+        }
+        None
+    }
+
+    fn get_output(redirects: &Vec<Redirect>) -> Option<Format> {
+        for c in redirects {
+            if let Redirect::Write(f) = c {
+                return Some(f.clone());
+            }
+        }
+
+        None
+    }
+
+    fn eval_bis(&mut self, fs: &mut Fs, cur: &Fdesc) -> Result<EvalResult, FsErr> {
+        let last = &self.cmd.pop().unwrap();
+
+        let res = if self.cmd.len() == 0 { //First command of the pipe chain
+            if let Some(input) = Self::get_input(&last.redirects) { //Use an eventual input
+                Ok(last.cmd.eval(fs,cur, &input)?)
+            } else {
+                Ok(last.cmd.eval(fs,cur, &vec![])?)
+            }
+
+        } else {
+            match self.eval_bis(fs,cur)?.stdout {
+                None => Ok(last.cmd.eval(fs,cur,&vec![])?),
+                Some(stdout) => {
+                    if let Some(input) = Self::get_input(&last.redirects) { //Input takes priority over pipe
+                        Ok(last.cmd.eval(fs,cur,&input)?)
+
+                    } else { //No input given
+                        if let Some(err) = fs.touch(cur,"__tmp") {return Err(err)};
+                        if let Some(err) = fs.write(cur,"__tmp", &stdout) {return Err(err)};
+                        let res = Ok(last.cmd.eval(fs,cur,&vec!['_','_','t','m','p'])?);
+                        if let Some(err) = fs.rm(cur, "__tmp") {return Err(err)};
+                        res
+                    }
+                }
+            }
+        };
+        //We can't return before because there might be an output specified
+
+        if let Some(output) = Self::get_output(&last.redirects) { //Output takes priority over pipe
+
+            let output_name = output.iter().collect::<String>(); //Converting output Vec<format> to String
+
+            let next_stdout = res.unwrap().stdout.clone(); //What we have to write into the specified output
+            println!("{:?}", next_stdout);
+            if let Some(_) = fs.write(cur, output_name.trim(), &next_stdout.clone().or(Some(Vec::new())).unwrap()) { //Handling not existing file
+                if let Some(err) = fs.touch(cur, output_name.trim()) {return Err(err)};
+                if let Some(err) = fs.write(cur, output_name.trim(), &next_stdout.clone().or(Some(Vec::new())).unwrap()) {return Err(err)};
+            }
+
+            Ok( EvalResult {
+                stdout: None, //Stdout lost in redirection
+                fdesc: None,
+                exit: false,
+            })
+
+        } else { //No output given
+            res
+        }
+    }
+
+    /*
+    fn eval(&self, fs: &mut Fs, cur: &Fdesc) -> Result<EvalResult, FsErr> {
+        for i in 0..self.cmd.len()-1 {
+            if let Err(err) = self.eval_aux(fs, cur, i) {return Err(err)};
+        }
+        self.eval_aux(fs, cur, self.cmd.len()-1)
+    }
+
+    fn eval_aux(&self, fs: &mut Fs, cur: &Fdesc, index: usize) -> Result<EvalResult, FsErr> {
+        let from_pipe = index > 0;
+        let to_pipe = index < self.cmd.len()-1;
+        let piped = &self.cmd[index];
+
+        match piped.cmd.name {
+            CmdType::Exit => return Ok( EvalResult {
+                stdout: None,
+                fdesc: None,
+                exit: true,
+            }),
+
+            _ => (),
+        }
+        
+        let mut buff = None;
+        let mut fdesc = None;
+
+        let mut input : Option<Format> = Self::first_input(&piped.redirects);
+
+        if from_pipe {
+            if let None = input {
+                input = Some(vec!['_','_','t','m','p']);
+            }
+        }
+
+        match piped.cmd.eval(fs, cur, &input.or(Some(Vec::new())).unwrap()) {
+            Err(err) => return Err(err),
+
+            Ok(res) => {
+                if from_pipe {
+                    if let Some(err) = fs.rm(cur, "__tmp") {return Err(err)};
+                }
+
+                if let Some(out) = Self::first_output(&piped.redirects) {
+                    let tmp = out.iter().collect::<String>();
+                    if let Some(err) = fs.write(cur, tmp.trim(), &res.stdout.clone().or(Some(Vec::new())).unwrap()) {
+                        match err {
+                            FsErr::FileNotFound => {
+                                if let Some(err) = fs.touch(cur, tmp.trim()) {return Err(err)};
+                                if let Some(err) = fs.write(cur, tmp.trim(), &res.stdout.or(Some(Vec::new())).unwrap()) {return Err(err)};
+                            },
+
+                            _ => return Err(err),
+                        }
+                    } else {
+                        buff = None;
+                    }
+                } else {
+                    if to_pipe {
+                        if let Some(err) = fs.touch(cur, "__tmp") {return Err(err)};
+                        if let Some(err) = fs.write(cur, "__tmp", &res.stdout.or(Some(Vec::new())).unwrap()) {return Err(err)};
+                    } else {
+                        buff = res.stdout;
+                    }
+                    if let Some(_) = res.fdesc {
+                        fdesc = res.fdesc;
+                    }
+                };
+            },
+        }
+
+        Ok( EvalResult {
+            stdout : buff,
+            fdesc : fdesc,
+            exit: false,
+        })
+    }
+    */
 }
 
 struct EvalResult {
@@ -600,17 +735,14 @@ pub fn setup() {
     
     let mut cur_desc = fs.get_home_fdesc();
 
-    // Optionnal setup
-    let mut cmd = match Command::parse(fmt_from("echo hello world pattern toto bibli ! > bar")) {
+    // TEST OF GREP (setup a file named 'file' with a sentence inside)
+    let mut cmd = match Command::parse_bis(fmt_from("echo hello world pattern toto bibli ! > file")) {
         Ok(cmd) => cmd,
         Err(err) => {parsing_handler(err);panic!("TEST SETUP FAILED !")}
     };
-    if let Err(err) = cmd.eval(&mut fs, &cur_desc) {fs_handler(err);panic!("TEST SETUP FAILED !")};
-    let mut cmd = match Command::parse(fmt_from("mkdir foo")) {
-        Ok(cmd) => cmd,
-        Err(err) => {parsing_handler(err);panic!("TEST SETUP FAILED !")}
-    };
-    if let Err(err) = cmd.eval(&mut fs, &cur_desc) {fs_handler(err);panic!("TEST SETUP FAILED !")};
+
+    if let Err(err) = cmd.eval_bis(&mut fs, &cur_desc) {fs_handler(err);panic!("TEST SETUP FAILED !")};
+
     println!("SUCCESSFULL SETUP");
     //
 
@@ -623,12 +755,12 @@ pub fn setup() {
             .read_line(&mut input)
             .expect("Error : failed to read line");
         
-        let mut cmd = match Command::parse(fmt_from(input.as_str())) {
+        let mut cmd = match Command::parse_bis(fmt_from(input.as_str())) {
             Ok(cmd) => cmd,
             Err(err) => {parsing_handler(err); continue}
         };
 
-        let result = match cmd.eval(&mut fs, &cur_desc) {
+        let result = match cmd.eval_bis(&mut fs, &cur_desc) {
             Err(err) => {fs_handler(err); continue},
             Ok(res) => res
         };
